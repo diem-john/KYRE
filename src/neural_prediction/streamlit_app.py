@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 import torch
@@ -21,6 +22,7 @@ from src.neural_prediction.training.trainer import Trainer, TrainingConfig
 from src.neural_prediction.inference import NeuralTrajectoryPredictor
 from src.neural_prediction.models.registry import list_checkpoints, read_checkpoint_metadata
 from src.neural_prediction.evaluation.metrics import trajectory_metrics, horizon_metrics
+from src.neural_prediction.evaluation.backtest import BacktestConfig, backtest_forecaster, persistence_forecast
 
 
 st.set_page_config(page_title="KYRE Neural Prediction Lab", layout="wide")
@@ -81,8 +83,8 @@ with st.sidebar:
     test_weeks = st.number_input("Test weeks", 1, 52, 24)
     max_staleness = st.number_input("Maximum staleness", 0, 20, 3)
 
-extract_tab, dataset_tab, physics_tab, train_tab, validation_tab, inference_tab, model_tab = st.tabs([
-    "1 · Extraction", "2 · Dataset", "3 · Physics", "4 · Training", "5 · Validation", "6 · Inference", "7 · Models"
+extract_tab, dataset_tab, physics_tab, train_tab, validation_tab, backtest_tab, inference_tab, model_tab = st.tabs([
+    "1 · Extraction", "2 · Dataset", "3 · Physics", "4 · Training", "5 · Validation", "6 · Backtest", "7 · Inference", "8 · Models"
 ])
 
 with extract_tab:
@@ -191,6 +193,54 @@ with validation_tab:
         st.metric("Best validation loss", f"{best.get('val_total', best.get('train_total')):.6f}")
     else:
         st.info("Train a model first.")
+
+with backtest_tab:
+    st.subheader("Rolling-Origin Backtest")
+    st.caption("This first backtest mode evaluates a frozen checkpoint at multiple historical origins. It measures temporal generalization; retraining-per-origin is a separate, more expensive protocol.")
+    if st.session_state.prepared is None:
+        st.info("Load data in Extraction first.")
+    else:
+        bt_lookback = st.number_input("Backtest lookback", 2, 104, int(lookback), key="bt_lookback")
+        bt_horizon = st.number_input("Backtest horizon", 1, 52, int(horizon), key="bt_horizon")
+        bt_stride = st.number_input("Backtest origin stride", 1, 52, int(horizon), key="bt_stride")
+        bt_min_history = st.number_input("Minimum history", 4, 208, max(24, int(lookback)), key="bt_min_history")
+        checkpoint_dir = Path("projects") / project_name / "neural_models"
+        checkpoints = list_checkpoints(checkpoint_dir)
+        if checkpoints:
+            selected_bt = st.selectbox("Backtest checkpoint", checkpoints, format_func=lambda p: p.name, key="bt_checkpoint")
+            if st.button("Run frozen-checkpoint backtest", type="primary"):
+                predictor = NeuralTrajectoryPredictor.load(selected_bt)
+                trajectories = {}
+                clean_model = st.session_state.prepared["clean_model"]
+                for cluster, group in clean_model.groupby(CLUSTER_COL, sort=False):
+                    z_cols = [col for col in group.columns if col.startswith(PCA_PREFIX)]
+                    values = group.sort_values(["year", "week"])[z_cols].to_numpy(dtype=np.float32)
+                    if len(values) >= bt_min_history + bt_horizon:
+                        trajectories[str(cluster)] = values
+                config = BacktestConfig(
+                    lookback=int(bt_lookback), horizon=int(bt_horizon),
+                    stride=int(bt_stride), min_history=int(bt_min_history)
+                )
+                neural_results, _ = backtest_forecaster(
+                    trajectories,
+                    lambda history, h: predictor.predict(history)[:h],
+                    config,
+                    selected_bt.stem,
+                )
+                persistence_results, _ = backtest_forecaster(
+                    trajectories,
+                    lambda history, h: persistence_forecast(history, h),
+                    config,
+                    "persistence",
+                )
+                from src.neural_prediction.evaluation.backtest import compare_backtests
+                comparison = compare_backtests([neural_results, persistence_results])
+                st.session_state.backtest_results = comparison
+                st.dataframe(comparison, use_container_width=True)
+                if not comparison.empty:
+                    st.line_chart(comparison.pivot(index="horizon", columns="model", values="rmse"))
+        else:
+            st.info("Train a model first so a checkpoint is available.")
 
 with inference_tab:
     st.subheader("Inference")
