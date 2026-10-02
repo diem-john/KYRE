@@ -32,46 +32,62 @@ class TrajectoryWindowDataset(Dataset):
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in self.samples[index].items()}
 
 
-def _derivatives(sequence: np.ndarray):
-    velocity = np.diff(sequence, axis=0)
-    acceleration = np.diff(velocity, axis=0)
-    return velocity, acceleration
+def _features(position: np.ndarray, config: WindowConfig) -> np.ndarray:
+    parts = [position]
+    velocity = np.diff(position, axis=0)
+    if config.include_velocity:
+        parts.append(np.vstack([np.zeros((1, position.shape[1]), dtype=np.float32), velocity]))
+    if config.include_acceleration:
+        acceleration = np.diff(velocity, axis=0)
+        parts.append(np.vstack([np.zeros((2, position.shape[1]), dtype=np.float32), acceleration]))
+    return np.concatenate(parts, axis=1)
 
 
-def build_trajectory_windows(
-    df: pd.DataFrame,
-    config: WindowConfig,
-    embedding_prefix: str = "z_",
-    cluster_col: str = "final_cluster_label",
-) -> TrajectoryWindowDataset:
-    """Convert model-space centroid histories into supervised sequences."""
+def _make_sample(values, start, config):
+    end = start + config.lookback + config.horizon
+    return {
+        "x": _features(values[start:start + config.lookback], config),
+        "y": values[start + config.lookback:end],
+    }
+
+
+def build_trajectory_windows(df, config, embedding_prefix="z_", cluster_col="final_cluster_label"):
+    """Build training windows entirely within the supplied chronological split."""
     if config.lookback < 2 or config.horizon < 1 or config.stride < 1:
         raise ValueError("lookback >= 2, horizon >= 1, and stride >= 1 are required")
-
     cols = embedding_cols(df, embedding_prefix)
     if not cols:
         raise ValueError(f"No embedding columns found with prefix {embedding_prefix!r}")
-
     samples = []
     for _, group in df.groupby(cluster_col, sort=False):
         values = sort_time(group)[cols].to_numpy(dtype=np.float32)
         minimum = config.lookback + config.horizon
-        if len(values) < minimum:
-            continue
-        for start in range(0, len(values) - minimum + 1, config.stride):
-            x_position = values[start:start + config.lookback]
-            y = values[start + config.lookback:start + minimum]
-            x_parts = [x_position]
-            if config.include_velocity:
-                velocity, _ = _derivatives(x_position)
-                x_parts.append(np.vstack([np.zeros((1, values.shape[1]), dtype=np.float32), velocity]))
-            if config.include_acceleration:
-                _, acceleration = _derivatives(x_position)
-                x_parts.append(np.vstack([np.zeros((2, values.shape[1]), dtype=np.float32), acceleration]))
-            samples.append({"x": np.concatenate(x_parts, axis=1), "y": y})
-
+        for start in range(0, max(0, len(values) - minimum + 1), config.stride):
+            samples.append(_make_sample(values, start, config))
     if not samples:
         raise ValueError("No temporal windows could be constructed from the supplied data")
+    return TrajectoryWindowDataset(samples)
+
+
+def build_validation_windows(history_df, target_df, config, embedding_prefix="z_", cluster_col="final_cluster_label"):
+    """Build validation windows using historical context plus validation targets."""
+    cols = embedding_cols(history_df, embedding_prefix)
+    if not cols:
+        raise ValueError(f"No embedding columns found with prefix {embedding_prefix!r}")
+    samples = []
+    for cluster, target_group in target_df.groupby(cluster_col, sort=False):
+        history_group = history_df[history_df[cluster_col] == cluster]
+        if history_group.empty:
+            continue
+        combined = sort_time(pd.concat([history_group, target_group], ignore_index=True))
+        values = combined[cols].to_numpy(dtype=np.float32)
+        history_end = len(history_group)
+        for target_start in range(history_end, len(values) - config.horizon + 1, config.horizon):
+            input_start = target_start - config.lookback
+            if input_start >= 0:
+                samples.append(_make_sample(values, input_start, config))
+    if not samples:
+        raise ValueError("No validation windows could be constructed")
     return TrajectoryWindowDataset(samples)
 
 
