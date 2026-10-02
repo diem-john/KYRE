@@ -85,6 +85,7 @@ class Trainer:
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save({
             "model_state_dict": self.model.state_dict(),
+            "model_type": "hybrid" if self.model.__class__.__name__ == "ConvLSTMAttention" else "physics_lstm",
             "optimizer_state_dict": self.optimizer.state_dict(),
             "epoch": epoch,
             "best_loss": best_loss,\n            "physics_curriculum": {\n                "warmup_epochs": self.config.physics_warmup_epochs,\n                "ramp_epochs": self.config.physics_ramp_epochs,\n            },
