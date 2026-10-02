@@ -15,6 +15,7 @@ from src.trajectory_prediction.utils.preprocessing import (
 from src.trajectory_prediction.utils.pca_preprocessing import add_pca_features
 from src.neural_prediction.data.dataset import WindowConfig, build_trajectory_windows, build_validation_windows, feature_dimension
 from src.neural_prediction.models.physics_lstm import ModelConfig, PhysicsLSTM
+from src.neural_prediction.models.hybrid_cnn_lstm_attention import HybridModelConfig, ConvLSTMAttention
 from src.neural_prediction.losses.physics_loss import LossWeights, PhysicsLoss
 from src.neural_prediction.training.trainer import Trainer, TrainingConfig
 from src.neural_prediction.inference import NeuralTrajectoryPredictor
@@ -133,10 +134,13 @@ with physics_tab:
     st.session_state.loss_weights = LossWeights(w_pos, w_vel, w_acc, w_cont)
 
 with train_tab:
-    st.subheader("Train Physics-Regularized LSTM")
+    st.subheader("Train Neural Prediction Engine")
+    architecture = st.selectbox("Architecture", ["Hybrid CNN + LSTM + Attention", "Physics-Regularized LSTM"])
     hidden = st.number_input("Hidden dimension", 16, 1024, 128, 16)
     layers = st.number_input("LSTM layers", 1, 6, 2)
     dropout = st.slider("Dropout", 0.0, 0.8, 0.2, 0.05)
+    attention_heads = st.number_input("Attention heads", 1, 16, 4)
+    conv_channels = st.number_input("Convolution channels", 8, 512, 128, 8)
     epochs = st.number_input("Epochs", 1, 1000, 50)
     batch = st.number_input("Batch size", 1, 1024, 64)
     lr = st.number_input("Learning rate", 1e-6, 1e-1, 1e-3, format="%.6f")
@@ -146,17 +150,29 @@ with train_tab:
         if "train_dataset" not in st.session_state or "validation_dataset" not in st.session_state:
             st.error("Build the Dataset first.")
         else:
-            mc = ModelConfig(
-                input_dim=feature_dimension(int(pca_dims), window_cfg),
-                embedding_dim=int(pca_dims), hidden_dim=int(hidden), num_layers=int(layers),
-                dropout=float(dropout), horizon=int(horizon),
-            )
-            model = PhysicsLSTM(mc)
+            if architecture.startswith("Hybrid"):
+                mc = HybridModelConfig(
+                    input_dim=feature_dimension(int(pca_dims), window_cfg),
+                    embedding_dim=int(pca_dims), hidden_dim=int(hidden),
+                    lstm_layers=int(layers), dropout=float(dropout),
+                    horizon=int(horizon), attention_heads=int(attention_heads),
+                    conv_channels=int(conv_channels),
+                )
+                model = ConvLSTMAttention(mc)
+            else:
+                mc = ModelConfig(
+                    input_dim=feature_dimension(int(pca_dims), window_cfg),
+                    embedding_dim=int(pca_dims), hidden_dim=int(hidden),
+                    num_layers=int(layers), dropout=float(dropout),
+                    horizon=int(horizon),
+                )
+                model = PhysicsLSTM(mc)
             loss = PhysicsLoss(getattr(st.session_state, "loss_weights", LossWeights()))
             tc = TrainingConfig(\n                epochs=int(epochs), batch_size=int(batch), learning_rate=float(lr),\n                patience=int(patience), device=device,\n                physics_warmup_epochs=int(warmup_epochs), physics_ramp_epochs=int(ramp_epochs),\n            )
             trainer = Trainer(model, loss, tc)
             project_dir = Path("projects") / project_name / "neural_models"
-            checkpoint = project_dir / "physics_lstm_best.pth"
+            model_slug = "hybrid_cnn_lstm_attention" if architecture.startswith("Hybrid") else "physics_lstm"
+            checkpoint = project_dir / f"{model_slug}_best.pth"
             with st.spinner("Training..."):
                 history = trainer.fit(st.session_state.train_dataset, st.session_state.validation_dataset, checkpoint, window_config=window_cfg)
             st.session_state.model = model
