@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.neural_prediction.models.physics_lstm import ModelConfig, PhysicsLSTM
+from src.neural_prediction.models.factory import build_model
 from src.neural_prediction.losses.physics_loss import LossWeights, PhysicsLoss
 from src.neural_prediction.data.dataset import WindowConfig, _features
 
