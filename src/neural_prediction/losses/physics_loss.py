@@ -22,7 +22,7 @@ class PhysicsLoss(nn.Module):
 
     def __init__(self, weights: LossWeights):
         super().__init__()
-        self.weights = weights
+        self.weights = weights\n        self.curriculum_scale = 1.0
 
     def forward(self, prediction: torch.Tensor, target: torch.Tensor):
         position = F.smooth_l1_loss(prediction, target)
@@ -55,5 +55,5 @@ class PhysicsLoss(nn.Module):
             "continuity": continuity,
         }
 
-    def config(self) -> dict:
+    def set_curriculum_scale(self, scale: float) -> None:\n        self.curriculum_scale = max(0.0, min(1.0, float(scale)))\n\n    def config(self) -> dict:
         return asdict(self.weights)
