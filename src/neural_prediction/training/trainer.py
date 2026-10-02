@@ -15,7 +15,7 @@ class TrainingConfig:
     weight_decay: float = 1e-5
     patience: int = 10
     device: str = "auto"
-    grad_clip: float = 1.0
+    grad_clip: float = 1.0\n    physics_warmup_epochs: int = 0\n    physics_ramp_epochs: int = 10
 
 
 def resolve_device(requested: str) -> torch.device:
@@ -87,7 +87,7 @@ class Trainer:
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "epoch": epoch,
-            "best_loss": best_loss,
+            "best_loss": best_loss,\n            "physics_curriculum": {\n                "warmup_epochs": self.config.physics_warmup_epochs,\n                "ramp_epochs": self.config.physics_ramp_epochs,\n            },
             "model_config": self.model.checkpoint_config(),
             "loss_config": self.loss_fn.config(),
             "training_config": asdict(self.config),
