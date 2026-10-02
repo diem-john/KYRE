@@ -55,7 +55,7 @@ class Trainer:
             raise ValueError("DataLoader is empty")
         return {k: v / count for k, v in totals.items()}
 
-    def fit(self, train_dataset, validation_dataset=None, checkpoint_path=None):
+    def fit(self, train_dataset, validation_dataset=None, checkpoint_path=None, window_config=None):
         train_loader = DataLoader(train_dataset, batch_size=self.config.batch_size, shuffle=True)
         val_loader = DataLoader(validation_dataset, batch_size=self.config.batch_size, shuffle=False) if validation_dataset is not None else None
         history, best, bad = [], float("inf"), 0
@@ -73,7 +73,7 @@ class Trainer:
             if monitor < best:
                 best, bad = monitor, 0
                 if checkpoint_path:
-                    self.save_checkpoint(checkpoint_path, epoch, best)
+                    self.save_checkpoint(checkpoint_path, epoch, best, window_config=window_config)
             else:
                 bad += 1
                 if bad >= self.config.patience:
