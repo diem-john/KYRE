@@ -67,7 +67,7 @@ def prepare_data(project_name: str, pca_dims: int, min_weeks: int, max_gap: int,
         test, pca_model=pca, scaler_model=scaler, n_dims=pca_dims,
         input_prefix=EMB_PREFIX, output_prefix=PCA_PREFIX, seed=SEED
     )
-    return {"raw": raw, "clean": clean, "summary": summary, "train": train_m, "validation": val_m, "test": test_m, "split_summary": split_summary, "pca": pca, "scaler": scaler, "variance": variance}
+    return {"raw": raw, "clean": clean, "clean_model": clean_m, "summary": summary, "train": train_m, "validation": val_m, "test": test_m, "split_summary": split_summary, "pca": pca, "scaler": scaler, "variance": variance}
 
 
 with st.sidebar:
@@ -153,7 +153,7 @@ with train_tab:
             )
             model = PhysicsLSTM(mc)
             loss = PhysicsLoss(getattr(st.session_state, "loss_weights", LossWeights()))
-            tc = TrainingConfig(int(epochs), int(batch), float(lr), patience=int(patience), device=device)
+            tc = TrainingConfig(\n                epochs=int(epochs), batch_size=int(batch), learning_rate=float(lr),\n                patience=int(patience), device=device,\n                physics_warmup_epochs=int(warmup_epochs), physics_ramp_epochs=int(ramp_epochs),\n            )
             trainer = Trainer(model, loss, tc)
             project_dir = Path("projects") / project_name / "neural_models"
             checkpoint = project_dir / "physics_lstm_best.pth"
