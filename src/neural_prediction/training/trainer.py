@@ -80,7 +80,7 @@ class Trainer:
                     break
         return history
 
-    def save_checkpoint(self, path, epoch, best_loss):
+    def save_checkpoint(self, path, epoch, best_loss, window_config=None):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save({
@@ -91,4 +91,5 @@ class Trainer:
             "model_config": self.model.checkpoint_config(),
             "loss_config": self.loss_fn.config(),
             "training_config": asdict(self.config),
+            "window_config": window_config or {},
         }, path)
