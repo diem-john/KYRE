@@ -17,6 +17,9 @@ from src.neural_prediction.data.dataset import WindowConfig, build_trajectory_wi
 from src.neural_prediction.models.physics_lstm import ModelConfig, PhysicsLSTM
 from src.neural_prediction.losses.physics_loss import LossWeights, PhysicsLoss
 from src.neural_prediction.training.trainer import Trainer, TrainingConfig
+from src.neural_prediction.inference import NeuralTrajectoryPredictor
+from src.neural_prediction.models.registry import list_checkpoints, read_checkpoint_metadata
+from src.neural_prediction.evaluation.metrics import trajectory_metrics, horizon_metrics
 
 
 st.set_page_config(page_title="KYRE Neural Prediction Lab", layout="wide")
@@ -155,7 +158,7 @@ with train_tab:
             project_dir = Path("projects") / project_name / "neural_models"
             checkpoint = project_dir / "physics_lstm_best.pth"
             with st.spinner("Training..."):
-                history = trainer.fit(st.session_state.train_dataset, st.session_state.validation_dataset, checkpoint)
+                history = trainer.fit(st.session_state.train_dataset, st.session_state.validation_dataset, checkpoint, window_config=window_cfg)
             st.session_state.model = model
             st.session_state.training_history = pd.DataFrame(history)
             st.session_state.last_checkpoint = checkpoint
