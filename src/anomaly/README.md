@@ -1,6 +1,6 @@
 # KYRE Anomaly Detection
 
-Initial unsupervised anomaly-detection module for the Neural Prediction Lab.
+Standalone unsupervised anomaly-detection module for KYRE. This package is kept separate from `src/neural_prediction/` and does not modify the neural prediction pipeline.
 
 ## Scope
 
@@ -17,7 +17,7 @@ The module does not require anomaly labels. Scores describe statistical unusualn
 Fit the pipeline on an explicitly selected reference period:
 
     from pathlib import Path
-    from src.neural_prediction.anomaly import AnomalyConfig, AnomalyDetectionPipeline
+    from src.anomaly import AnomalyConfig, AnomalyDetectionPipeline
 
     config = AnomalyConfig(
         pca_prefix='z_',
@@ -55,4 +55,4 @@ These scores are not probabilities. With no ground-truth labels, use injected-an
 
 ## Integration status
 
-This package is intentionally not wired into the Streamlit app yet. The next implementation step is unit testing against the repository's actual trajectory schema, then adding a dedicated dashboard tab. Existing forecasting code and checkpoints are untouched.
+This package is intentionally independent of the neural prediction package and is not wired into the Streamlit app yet. Validate against KYRE's actual anomaly-detection data schema before adding any dashboard integration.
