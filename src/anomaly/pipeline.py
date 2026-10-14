@@ -23,7 +23,7 @@ class AnomalyDetectionPipeline:
     thresholds, so it can be called safely from interactive dashboard filters.
     """
 
-    ARTIFACT_VERSION = 1
+    ARTIFACT_VERSION = 2
 
     def __init__(self, config: AnomalyConfig | None = None, neural_predictor: Any | None = None):
         self.config = config or AnomalyConfig()
