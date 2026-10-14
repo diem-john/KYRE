@@ -6,7 +6,8 @@ import numpy as np
 import torch
 
 from src.neural_prediction.models.factory import build_model
-from src.neural_prediction.losses.physics_loss import LossWeights, PhysicsLoss
+from src.neural_prediction.models.physics_lstm import ModelConfig
+from src.neural_prediction.models.hybrid_cnn_lstm_attention import HybridModelConfig
 from src.neural_prediction.data.dataset import WindowConfig, _features
 
 
@@ -21,10 +22,14 @@ class NeuralTrajectoryPredictor:
     @classmethod
     def load(cls, path: str | Path, device: str = "cpu"):
         checkpoint = torch.load(path, map_location=device, weights_only=False)
-        mc = ModelConfig(**checkpoint["model_config"])
-        model = PhysicsLSTM(mc)
+        model_type = checkpoint.get("model_type", "physics_lstm")
+        if model_type == "hybrid":
+            mc = HybridModelConfig(**checkpoint["model_config"])
+            model = build_model("hybrid", mc)
+        else:
+            mc = ModelConfig(**checkpoint["model_config"])
+            model = build_model("physics_lstm", mc)
         model.load_state_dict(checkpoint["model_state_dict"])
-        training_config = checkpoint.get("training_config", {})
         window_config = WindowConfig(
             lookback=checkpoint.get("window_config", {}).get("lookback", 12),
             horizon=mc.horizon,
