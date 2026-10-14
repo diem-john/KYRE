@@ -30,12 +30,20 @@ class NeuralTrajectoryPredictor:
             mc = ModelConfig(**checkpoint["model_config"])
             model = build_model("physics_lstm", mc)
         model.load_state_dict(checkpoint["model_state_dict"])
+        saved_window_config = checkpoint.get("window_config", {})
+        if not isinstance(saved_window_config, dict):
+            saved_window_config = {
+                "lookback": getattr(saved_window_config, "lookback", 12),
+                "stride": getattr(saved_window_config, "stride", 1),
+                "include_velocity": getattr(saved_window_config, "include_velocity", True),
+                "include_acceleration": getattr(saved_window_config, "include_acceleration", True),
+            }
         window_config = WindowConfig(
-            lookback=checkpoint.get("window_config", {}).get("lookback", 12),
+            lookback=saved_window_config.get("lookback", 12),
             horizon=mc.horizon,
-            stride=checkpoint.get("window_config", {}).get("stride", 1),
-            include_velocity=checkpoint.get("window_config", {}).get("include_velocity", True),
-            include_acceleration=checkpoint.get("window_config", {}).get("include_acceleration", True),
+            stride=saved_window_config.get("stride", 1),
+            include_velocity=saved_window_config.get("include_velocity", True),
+            include_acceleration=saved_window_config.get("include_acceleration", True),
         )
         return cls(model, window_config, device)
 
