@@ -107,6 +107,45 @@ class AnomalyDetectionPipeline:
         """
         if reference_data.empty:
             raise ValueError("Reference data cannot be empty")
+        if self.neural_signal is not None:
+            if calibration_data is None or calibration_data.empty:
+                raise ValueError(
+                    "calibration_data is required when neural prediction scoring is enabled; "
+                    "use a chronological held-out validation split."
+                )
+            required_time = {
+                self.config.cluster_col, self.config.year_col, self.config.week_col
+            }
+            missing_time = sorted(required_time.difference(reference_data.columns))
+            missing_calibration_time = sorted(required_time.difference(calibration_data.columns))
+            if missing_time or missing_calibration_time:
+                raise ValueError(
+                    "Reference/calibration data must include cluster and time columns; "
+                    f"missing reference={missing_time}, calibration={missing_calibration_time}"
+                )
+            for cluster, calibration_group in calibration_data.groupby(
+                self.config.cluster_col, sort=False
+            ):
+                reference_group = reference_data[
+                    reference_data[self.config.cluster_col] == cluster
+                ]
+                if reference_group.empty:
+                    continue
+                first_calibration = tuple(
+                    calibration_group.sort_values(
+                        [self.config.year_col, self.config.week_col]
+                    )[[self.config.year_col, self.config.week_col]].iloc[0].tolist()
+                )
+                last_reference = tuple(
+                    reference_group.sort_values(
+                        [self.config.year_col, self.config.week_col]
+                    )[[self.config.year_col, self.config.week_col]].iloc[-1].tolist()
+                )
+                if first_calibration <= last_reference:
+                    raise ValueError(
+                        f"Calibration data for cluster {cluster!r} must be strictly later "
+                        "than its reference/training data."
+                    )
         timesteps = self.motion_scorer.fit(self._timestep_features(reference_data)).score(
             self._timestep_features(reference_data)
         )
@@ -174,11 +213,6 @@ class AnomalyDetectionPipeline:
         }
         self.fitted_ = True
         if self.neural_signal is not None:
-            if calibration_data is None or calibration_data.empty:
-                raise ValueError(
-                    "calibration_data is required when neural prediction scoring is enabled; "
-                    "use a chronological held-out validation split."
-                )
             calibration_errors = self.neural_signal.score(
                 calibration_data, history_data=reference_data
             )
@@ -348,6 +382,18 @@ class AnomalyDetectionPipeline:
             summary = summary.join(window_summary, how="left")
             summary[["window_count", "flagged_windows"]] = summary[
                 ["window_count", "flagged_windows"]
+            ].fillna(0).astype(int)
+        if "neural_prediction_error" in timestep_results.columns:
+            neural_summary = timestep_results.groupby("trajectory_id", dropna=False).agg(
+                neural_scored_timesteps=(
+                    "neural_prediction_error",
+                    lambda values: int(np.isfinite(values.to_numpy(dtype=float)).sum()),
+                ),
+                max_neural_prediction_error=("neural_prediction_error", "max"),
+            )
+            summary = summary.join(neural_summary, how="left")
+            summary["neural_scored_timesteps"] = summary[
+                "neural_scored_timesteps"
             ].fillna(0).astype(int)
         return summary.reset_index()
 
