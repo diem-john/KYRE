@@ -363,6 +363,7 @@ def main() -> int:
             float(pca.explained_variance_ratio_.sum())
             if hasattr(pca, "explained_variance_ratio_") else None
         ),
+        "anomaly_thresholds": pipeline.thresholds_,
         "neural_prediction_signal": {
             "enabled": neural_predictor is not None,
             "checkpoint": str(checkpoint_path) if checkpoint_path is not None else None,
@@ -376,6 +377,16 @@ def main() -> int:
                 if neural_predictor is not None else None
             ),
             "threshold_calibration_split": "validation" if neural_predictor is not None else "train",
+            "calibration_residual_summary": (
+                {
+                    "count": int(len(pipeline.reference_timestep_scores_["neural"])),
+                    "mean": float(np.mean(pipeline.reference_timestep_scores_["neural"])),
+                    "median": float(np.median(pipeline.reference_timestep_scores_["neural"])),
+                    "p95": float(np.quantile(pipeline.reference_timestep_scores_["neural"], 0.95)),
+                    "max": float(np.max(pipeline.reference_timestep_scores_["neural"])),
+                }
+                if neural_predictor is not None else None
+            ),
         },
         "anomaly_label_distribution": {
             split: label_distribution(timestep_scores, split)
