@@ -216,6 +216,15 @@ def main() -> int:
         neural_predictor = NeuralTrajectoryPredictor.load(
             checkpoint_path, device=args.neural_device
         )
+        checkpoint_dims = getattr(
+            getattr(neural_predictor.model, "config", None), "embedding_dim", None
+        )
+        if checkpoint_dims != args.pca_dims:
+            raise ValueError(
+                f"Checkpoint embedding_dim={checkpoint_dims} does not match "
+                f"--pca-dims={args.pca_dims}. Use the PCA dimensionality and fitted "
+                "PCA/scaler basis used when this checkpoint was trained."
+            )
 
     print("[5/7] Fitting anomaly pipeline on train rows; validation calibrates neural fusion when enabled")
     pipeline = AnomalyDetectionPipeline(
