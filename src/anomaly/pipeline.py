@@ -17,10 +17,11 @@ from src.anomaly.statistical import RobustMotionScorer
 
 
 class AnomalyDetectionPipeline:
-    """Unsupervised anomaly detection with robust motion and Isolation Forest scores.
+    """Hybrid anomaly detector with motion, Isolation Forest, and optional neural residual signals.
 
-    Fit once on a designated reference period. Scoring does not refit models or
-    thresholds, so it can be called safely from interactive dashboard filters.
+    Fit once on a designated reference period. When a neural predictor is supplied,
+    a separate chronological calibration split is required for residual ranks and
+    fused thresholds. Scoring does not refit models or thresholds.
     """
 
     ARTIFACT_VERSION = 2
