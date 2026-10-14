@@ -12,6 +12,7 @@ from sklearn.ensemble import IsolationForest
 
 from src.anomaly.config import AnomalyConfig
 from src.anomaly.features import build_timestep_features, build_window_features
+from src.anomaly.neural_signal import NeuralPredictionSignal
 from src.anomaly.statistical import RobustMotionScorer
 
 
@@ -24,9 +25,20 @@ class AnomalyDetectionPipeline:
 
     ARTIFACT_VERSION = 1
 
-    def __init__(self, config: AnomalyConfig | None = None):
+    def __init__(self, config: AnomalyConfig | None = None, neural_predictor: Any | None = None):
         self.config = config or AnomalyConfig()
         self.motion_scorer = RobustMotionScorer()
+        self.neural_signal = (
+            NeuralPredictionSignal(
+                neural_predictor,
+                cluster_col=self.config.cluster_col,
+                pca_prefix=self.config.pca_prefix,
+                year_col=self.config.year_col,
+                week_col=self.config.week_col,
+            )
+            if neural_predictor is not None else None
+        )
+        self.neural_history_data_: pd.DataFrame | None = None
         self.timestep_model: IsolationForest | None = None
         self.window_model: IsolationForest | None = None
         self.timestep_feature_columns_: list[str] = []
@@ -82,8 +94,17 @@ class AnomalyDetectionPipeline:
             np.where(scores >= thresholds["warning"], "Warning", "Normal"),
         )
 
-    def fit(self, reference_data: pd.DataFrame) -> "AnomalyDetectionPipeline":
-        """Fit both detectors and calibrate thresholds using reference data only."""
+    def fit(
+        self,
+        reference_data: pd.DataFrame,
+        calibration_data: pd.DataFrame | None = None,
+    ) -> "AnomalyDetectionPipeline":
+        """Fit detectors on reference data and optionally calibrate neural fusion on held-out data.
+
+        When a neural predictor is supplied, calibration_data is required and must
+        be chronologically after reference_data. This prevents in-sample neural
+        residuals from setting the fused anomaly thresholds.
+        """
         if reference_data.empty:
             raise ValueError("Reference data cannot be empty")
         timesteps = self.motion_scorer.fit(self._timestep_features(reference_data)).score(
@@ -152,10 +173,73 @@ class AnomalyDetectionPipeline:
             "high": float(np.quantile(window_combined, self.config.high_quantile)),
         }
         self.fitted_ = True
+        if self.neural_signal is not None:
+            if calibration_data is None or calibration_data.empty:
+                raise ValueError(
+                    "calibration_data is required when neural prediction scoring is enabled; "
+                    "use a chronological held-out validation split."
+                )
+            calibration_errors = self.neural_signal.score(
+                calibration_data, history_data=reference_data
+            )
+            valid_errors = calibration_errors["neural_prediction_error"].to_numpy(dtype=float)
+            valid_errors = valid_errors[np.isfinite(valid_errors)]
+            if not len(valid_errors):
+                raise ValueError(
+                    "No finite neural prediction residuals were available for calibration. "
+                    "Check checkpoint lookback and per-cluster history lengths."
+                )
+            self.reference_timestep_scores_["neural"] = valid_errors
+
+            calibration_points = self.score_timesteps(
+                calibration_data, history_data=reference_data
+            )
+            calibration_windows_raw = self._window_features(calibration_points)
+            window_errors = calibration_windows_raw.get(
+                "neural_prediction_error_max_abs", pd.Series(dtype=float)
+            ).to_numpy(dtype=float)
+            window_errors = window_errors[np.isfinite(window_errors)]
+            if not len(window_errors):
+                raise ValueError(
+                    "No finite neural residual windows were available for calibration."
+                )
+            self.reference_window_scores_["neural"] = window_errors
+
+            # Thresholds for the fused score are calibrated on held-out validation
+            # observations, not on the detector's training rows.
+            point_scores = calibration_points["anomaly_score"].to_numpy(dtype=float)
+            self.thresholds_["timestep"] = {
+                "warning": float(np.quantile(point_scores, self.config.warning_quantile)),
+                "high": float(np.quantile(point_scores, self.config.high_quantile)),
+            }
+            calibration_windows = self.score_windows(
+                calibration_data, history_data=reference_data
+            )
+            window_scores = calibration_windows["anomaly_score"].to_numpy(dtype=float)
+            self.thresholds_["window"] = {
+                "warning": float(np.quantile(window_scores, self.config.warning_quantile)),
+                "high": float(np.quantile(window_scores, self.config.high_quantile)),
+            }
+            self.neural_history_data_ = pd.concat(
+                [reference_data, calibration_data], ignore_index=True
+            ).sort_values(
+                [self.config.cluster_col, self.config.year_col, self.config.week_col],
+                kind="stable",
+            ).reset_index(drop=True)
         return self
 
-    def score_timesteps(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Score observations and return one result per source row."""
+    def score_timesteps(
+        self,
+        data: pd.DataFrame,
+        *,
+        history_data: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
+        """Score observations and return one result per source row.
+
+        For neural scoring, history_data must contain only observations preceding
+        the scored period. If omitted, the fitted training + calibration history
+        is used when available.
+        """
         self._require_fitted()
         timesteps = self.motion_scorer.score(self._timestep_features(data))
         isolation = -self.timestep_model.score_samples(timesteps[self.timestep_feature_columns_])
@@ -166,18 +250,40 @@ class AnomalyDetectionPipeline:
         isolation_rank = self._percentile_rank(
             isolation, self.reference_timestep_scores_["isolation"]
         )
-        combined = np.maximum(motion_rank, isolation_rank)
+        components = [motion_rank, isolation_rank]
         timesteps["isolation_score"] = isolation
         timesteps["motion_rank"] = motion_rank
         timesteps["isolation_rank"] = isolation_rank
+
+        if self.neural_signal is not None:
+            if history_data is None:
+                history_data = self.neural_history_data_
+            neural = self.neural_signal.score(data, history_data=history_data)
+            errors = neural["neural_prediction_error"].to_numpy(dtype=float)
+            neural_rank = np.zeros(len(errors), dtype=float)
+            valid = np.isfinite(errors)
+            if valid.any():
+                neural_rank[valid] = self._percentile_rank(
+                    errors[valid], self.reference_timestep_scores_["neural"]
+                )
+            timesteps["neural_prediction_error"] = errors
+            timesteps["neural_rank"] = neural_rank
+            components.append(neural_rank)
+
+        combined = np.maximum.reduce(components)
         timesteps["anomaly_score"] = combined
         timesteps["anomaly_label"] = self._labels(combined, "timestep")
         return timesteps.sort_values("_source_row").reset_index(drop=True)
 
-    def score_windows(self, data: pd.DataFrame) -> pd.DataFrame:
+    def score_windows(
+        self,
+        data: pd.DataFrame,
+        *,
+        history_data: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
         """Score trajectory windows and return their source ranges and labels."""
         self._require_fitted()
-        timesteps = self.score_timesteps(data)
+        timesteps = self.score_timesteps(data, history_data=history_data)
         windows = self._window_features(timesteps)
         isolation = -self.window_model.score_samples(windows[self.window_feature_columns_])
         motion_column = "motion_score_max_abs"
@@ -189,10 +295,27 @@ class AnomalyDetectionPipeline:
         isolation_rank = self._percentile_rank(
             isolation, self.reference_window_scores_["isolation"]
         )
-        combined = np.maximum(motion_rank, isolation_rank)
+        components = [motion_rank, isolation_rank]
         windows["isolation_score"] = isolation
         windows["motion_rank"] = motion_rank
         windows["isolation_rank"] = isolation_rank
+
+        if self.neural_signal is not None:
+            errors = windows.get(
+                "neural_prediction_error_max_abs",
+                pd.Series(np.full(len(windows), np.nan), index=windows.index),
+            ).to_numpy(dtype=float)
+            neural_rank = np.zeros(len(errors), dtype=float)
+            valid = np.isfinite(errors)
+            if valid.any():
+                neural_rank[valid] = self._percentile_rank(
+                    errors[valid], self.reference_window_scores_["neural"]
+                )
+            windows["neural_prediction_error"] = errors
+            windows["neural_rank"] = neural_rank
+            components.append(neural_rank)
+
+        combined = np.maximum.reduce(components)
         windows["anomaly_score"] = combined
         windows["anomaly_label"] = self._labels(combined, "window")
         return windows
