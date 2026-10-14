@@ -89,6 +89,19 @@ class NeuralPredictionSignal:
             else:
                 history_group = context[context[self.cluster_col] == cluster]
                 history_group = _sort_trajectory(history_group)
+                first_target_time = (
+                    target_group[self.year_col].iloc[0],
+                    target_group[self.week_col].iloc[0],
+                )
+                # Only keep context before the earliest target. This also makes
+                # calls safe when the caller passes a broader frame by mistake.
+                history_group = history_group[
+                    (history_group[self.year_col] < first_target_time[0])
+                    | (
+                        (history_group[self.year_col] == first_target_time[0])
+                        & (history_group[self.week_col] < first_target_time[1])
+                    )
+                ]
 
             prior_values = history_group[positions].to_numpy(dtype=np.float32)
             prior_times = list(zip(history_group[self.year_col].tolist(), history_group[self.week_col].tolist()))
