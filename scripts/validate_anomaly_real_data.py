@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from config import CLUSTER_COL, EMB_PREFIX, PCA_PREFIX, SEED
 from src.anomaly import AnomalyConfig, AnomalyDetectionPipeline
+from src.neural_prediction.inference import NeuralTrajectoryPredictor
 from src.trajectory_prediction.utils.pca_preprocessing import add_pca_features
 from src.trajectory_prediction.utils.preprocessing import (
     load_centroid_weekly_embeddings,
@@ -44,6 +45,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--estimators", type=int, default=200)
     parser.add_argument("--spike-magnitude", type=float, default=8.0)
     parser.add_argument("--max-injection-trajectories", type=int, default=5)
+    parser.add_argument(
+        "--neural-checkpoint",
+        type=Path,
+        default=None,
+        help="Optional trained neural_prediction .pth checkpoint. When supplied, validation data calibrates the neural residual signal.",
+    )
+    parser.add_argument(
+        "--neural-device",
+        default="cpu",
+        choices=("cpu", "cuda"),
+        help="Device used for neural inference when --neural-checkpoint is supplied.",
+    )
     return parser.parse_args()
 
 
@@ -191,20 +204,43 @@ def main() -> int:
         random_state=SEED,
     )
 
-    print("[5/7] Fitting anomaly pipeline on train rows only")
-    pipeline = AnomalyDetectionPipeline(config).fit(train_m)
+    neural_predictor = None
+    checkpoint_path = None
+    if args.neural_checkpoint is not None:
+        checkpoint_path = args.neural_checkpoint
+        if not checkpoint_path.is_absolute():
+            checkpoint_path = REPO_ROOT / checkpoint_path
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(f"Neural checkpoint not found: {checkpoint_path}")
+        print(f"Loading neural prediction checkpoint: {checkpoint_path}")
+        neural_predictor = NeuralTrajectoryPredictor.load(
+            checkpoint_path, device=args.neural_device
+        )
 
-    print("[6/7] Scoring trajectories while preserving temporal context across split boundaries")
-    # Feature extraction is causal (current and prior observations only). Scoring
-    # the concatenated series preserves velocity/acceleration/jerk context at the
-    # start of validation/test; the fitted detector and score thresholds use train only.
-    timestep_scores = pipeline.score_timesteps(all_model)
+    print("[5/7] Fitting anomaly pipeline on train rows; validation calibrates neural fusion when enabled")
+    pipeline = AnomalyDetectionPipeline(
+        config, neural_predictor=neural_predictor
+    ).fit(
+        train_m,
+        calibration_data=validation_m if neural_predictor is not None else None,
+    )
+
+    print("[6/7] Scoring trajectories while preserving causal temporal context")
+    # Scoring the combined chronological frame preserves motion-feature context.
+    # Neural residuals are generated one step ahead: for this full-frame pass the
+    # signal builds history incrementally, without passing future rows as context.
+    empty_history = all_model.iloc[0:0].copy()
+    timestep_scores = pipeline.score_timesteps(
+        all_model, history_data=empty_history
+    )
     timestep_splits = all_model["sequence_split"].to_numpy()
     timestep_scores["sequence_split"] = timestep_splits[
         timestep_scores["_source_row"].astype(int).to_numpy()
     ]
 
-    window_scores = pipeline.score_windows(all_model)
+    window_scores = pipeline.score_windows(
+        all_model, history_data=empty_history
+    )
     split_labels = all_model["sequence_split"].to_numpy()
     window_scores["start_split"] = split_labels[
         window_scores["window_start_row"].astype(int).to_numpy()
@@ -238,7 +274,10 @@ def main() -> int:
     test_for_injection = test_m.sort_values(
         [CLUSTER_COL, "year", "week"], kind="stable"
     ).reset_index(drop=True)
-    baseline_test_scores = pipeline.score_timesteps(test_for_injection)
+    prior_test_history = pd.concat([train_m, validation_m], ignore_index=True)
+    baseline_test_scores = pipeline.score_timesteps(
+        test_for_injection, history_data=prior_test_history
+    )
     z_cols = [column for column in test_for_injection.columns if column.startswith(PCA_PREFIX)]
     injection_records = []
     if z_cols and args.max_injection_trajectories > 0:
@@ -258,7 +297,9 @@ def main() -> int:
             injected = test_for_injection.copy()
             original_value = float(injected.at[row_idx, column])
             injected.at[row_idx, column] = original_value + args.spike_magnitude * scale
-            injected_scores = pipeline.score_timesteps(injected)
+            injected_scores = pipeline.score_timesteps(
+                injected, history_data=prior_test_history
+            )
             baseline_row = baseline_test_scores.loc[
                 baseline_test_scores["_source_row"] == row_idx
             ].iloc[0]
@@ -313,6 +354,20 @@ def main() -> int:
             float(pca.explained_variance_ratio_.sum())
             if hasattr(pca, "explained_variance_ratio_") else None
         ),
+        "neural_prediction_signal": {
+            "enabled": neural_predictor is not None,
+            "checkpoint": str(checkpoint_path) if checkpoint_path is not None else None,
+            "device": args.neural_device if neural_predictor is not None else None,
+            "lookback_weeks": (
+                int(neural_predictor.window_config.lookback)
+                if neural_predictor is not None else None
+            ),
+            "forecast_horizon_weeks": (
+                int(neural_predictor.window_config.horizon)
+                if neural_predictor is not None else None
+            ),
+            "threshold_calibration_split": "validation" if neural_predictor is not None else "train",
+        },
         "anomaly_label_distribution": {
             split: label_distribution(timestep_scores, split)
             for split in ("train", "validation", "test")
@@ -332,6 +387,8 @@ def main() -> int:
         "limitations": [
             "Anomaly scores are unsupervised rankings, not probabilities or ground-truth accuracy.",
             "Spike injection tests sensitivity to artificial PCA-space outliers only.",
+            "When neural prediction scoring is enabled, its residual reference and fused thresholds are calibrated on held-out validation data.",
+            "Rows without enough preceding history have no neural residual; the neural rank is neutral for those rows.",
             "Flagged real trajectories require domain review before being treated as genuine anomalies.",
         ],
         "output_directory": str(output_dir),
