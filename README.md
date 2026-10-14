@@ -117,3 +117,43 @@ streamlit run src/trajectory_dashboard/Trajectory_Overview.py
 ```
 
 Open the local Streamlit URL shown in the terminal to review trajectory predictions, decoded behavior, and anomaly analysis.
+
+
+## Neural-Prediction-Assisted Anomaly Detection
+
+The separate `src/anomaly/` pipeline supports an optional third signal derived from the existing `src/neural_prediction/` model: the one-step-ahead prediction residual. The original motion-based and Isolation Forest signals remain active whether or not neural scoring is enabled.
+
+### Run Without Neural Prediction
+
+The original validation flow remains available:
+
+```bash
+python scripts/validate_anomaly_real_data.py --project-name trajectory_prediction_data_hitachi
+```
+
+### Run With a Trained Neural Checkpoint
+
+First train a neural prediction model using the same project, PCA dimensionality, train/validation split, and preprocessing settings used for anomaly validation. The checkpoint must predict the same `z_` coordinate system that the validation script creates.
+
+Then run, for example:
+
+```bash
+python scripts/validate_anomaly_real_data.py \
+  --project-name trajectory_prediction_data_hitachi \
+  --neural-checkpoint projects/trajectory_prediction_data_hitachi/neural_models/hybrid_cnn_lstm_attention_best.pth \
+  --neural-device cpu
+```
+
+Use the checkpoint filename actually produced by your training run. `--neural-device cuda` can be used when CUDA is available.
+
+When a checkpoint is supplied:
+
+1. The motion detector and Isolation Forest are fitted on the chronological training split.
+2. Neural one-step-ahead errors are calculated on the held-out validation split, using only earlier training observations as history.
+3. Validation residuals calibrate the neural percentile ranks and fused warning/high thresholds.
+4. Test observations are scored using training + validation history; target observations are only appended to history after their own prediction is made.
+5. The CSV output includes `neural_prediction_error` and `neural_rank` at timestep and window levels, and the JSON report records whether neural scoring was enabled.
+
+Rows without enough historical observations for the checkpoint's lookback receive no neural residual. In that case, the neural rank is neutral and the existing motion/Isolation Forest signals still contribute. Scores are anomaly rankings, not probabilities; review flagged trajectories before treating them as confirmed anomalies.
+
+The fitted pipeline artifact format was bumped to version 2 for the expanded scoring state. Regenerate older anomaly artifacts using this branch before loading them with the updated code.
