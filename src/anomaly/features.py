@@ -120,7 +120,10 @@ def build_window_features(
         column for column in timestep_features.columns if column.startswith("position_")
     ]
     value_columns = position_columns + [
-        column for column in ("velocity_norm", "acceleration_norm", "jerk_norm", "motion_score")
+        column for column in (
+            "velocity_norm", "acceleration_norm", "jerk_norm", "motion_score",
+            "neural_prediction_error",
+        )
         if column in timestep_features.columns
     ]
     records = []
@@ -154,9 +157,16 @@ def build_window_features(
             }
             for column in value_columns:
                 values = window[column].to_numpy(dtype=np.float64)
-                record[f"{column}_mean"] = float(np.mean(values))
-                record[f"{column}_std"] = float(np.std(values))
-                record[f"{column}_max_abs"] = float(np.max(np.abs(values)))
+                finite = values[np.isfinite(values)]
+                if not len(finite):
+                    mean_value = std_value = max_abs_value = np.nan
+                else:
+                    mean_value = float(np.mean(finite))
+                    std_value = float(np.std(finite))
+                    max_abs_value = float(np.max(np.abs(finite)))
+                record[f"{column}_mean"] = mean_value
+                record[f"{column}_std"] = std_value
+                record[f"{column}_max_abs"] = max_abs_value
             records.append(record)
     if not records:
         raise ValueError("No windows could be constructed; trajectories need >= 2 rows")
