@@ -24,7 +24,7 @@ st.set_page_config(
 pages = {
     "Trajectory Prediction": [
         st.Page(
-            str(ROOT / "src" / "neural_prediction" / "streamlit_app.py"),
+            "src/neural_prediction/streamlit_app.py",
             title="Trajectory Prediction Lab",
             icon="📈",
             default=True,
@@ -32,7 +32,7 @@ pages = {
     ],
     "Anomaly Intelligence": [
         st.Page(
-            str(ROOT / "app_anomaly.py"),
+            "app_anomaly.py",
             title="Anomaly Detection",
             icon="🔎",
         ),
