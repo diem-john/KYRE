@@ -268,6 +268,11 @@ class AnomalyDetectionPipeline:
                 )
             timesteps["neural_prediction_error"] = errors
             timesteps["neural_rank"] = neural_rank
+            # Preserve rolling one-step forecasts for dashboard visualization.
+            # These columns are diagnostic outputs and do not affect the fused score.
+            for column in neural.columns:
+                if column.startswith(("actual_", "predicted_")):
+                    timesteps[column] = neural[column].to_numpy()
             components.append(neural_rank)
 
         combined = np.maximum.reduce(components)
