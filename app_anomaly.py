@@ -482,7 +482,14 @@ elif page == "Investigate Results":
             "requires the validation script to save scored timestep/window tables."
         )
     else:
-        selected = st.selectbox("Result table", tables, format_func=lambda p: p.name)
+        default_table = next(
+            (i for i, path in enumerate(tables) if path.name == "timestep_scores.csv"),
+            0,
+        )
+        selected = st.selectbox(
+            "Result table", tables, index=default_table,
+            format_func=lambda p: p.name,
+        )
         df = load_table(str(selected), selected.stat().st_mtime)
         if df.empty:
             st.warning("The selected table could not be read or is empty.")
@@ -501,6 +508,166 @@ elif page == "Investigate Results":
                 chosen_clusters = f2.multiselect("Cluster / trajectory", clusters)
                 if chosen_clusters:
                     filtered = filtered[filtered[cluster_col].astype(str).isin(chosen_clusters)]
+            # Time-series forecast and anomaly overlay for scored timestep results.
+            if selected.name == "timestep_scores.csv":
+                st.divider()
+                st.subheader("Time-series prediction and flagged anomalies")
+                forecast_dims = sorted(
+                    [
+                        col[len("actual_"):]
+                        for col in filtered.columns
+                        if col.startswith("actual_")
+                        and f"predicted_{col[len('actual_'):]}" in filtered.columns
+                    ],
+                    key=lambda name: (
+                        0, int(name.split("_")[-1])
+                    ) if name.split("_")[-1].isdigit() else (1, name),
+                )
+                chart_df = filtered.copy()
+                if cluster_col and not chart_df.empty:
+                    chart_clusters = sorted(chart_df[cluster_col].dropna().astype(str).unique())
+                    if chart_clusters:
+                        preferred = (
+                            chosen_clusters[0] if "chosen_clusters" in locals() and len(chosen_clusters) == 1
+                            else chart_clusters[0]
+                        )
+                        chart_cluster = st.selectbox(
+                            "Trajectory / cluster to visualize",
+                            chart_clusters,
+                            index=chart_clusters.index(preferred) if preferred in chart_clusters else 0,
+                            key="forecast_chart_cluster",
+                        )
+                        chart_df = chart_df[chart_df[cluster_col].astype(str) == chart_cluster].copy()
+                if "sequence_split" in chart_df.columns and not chart_df.empty:
+                    split_options = [
+                        split for split in ("train", "validation", "test")
+                        if split in chart_df["sequence_split"].astype(str).unique()
+                    ]
+                    if split_options:
+                        selected_split = st.selectbox(
+                            "Time period", split_options,
+                            index=split_options.index("test") if "test" in split_options else 0,
+                            key="forecast_chart_split",
+                        )
+                        chart_df = chart_df[
+                            chart_df["sequence_split"].astype(str) == selected_split
+                        ].copy()
+
+                if "year" in chart_df.columns and "week" in chart_df.columns:
+                    chart_df["timestamp"] = pd.to_datetime(
+                        chart_df["year"].astype("Int64").astype(str)
+                        + "-W"
+                        + chart_df["week"].astype("Int64").astype(str).str.zfill(2)
+                        + "-1",
+                        format="%G-W%V-%u",
+                        errors="coerce",
+                    )
+                else:
+                    chart_df["timestamp"] = pd.NaT
+                chart_df = chart_df.dropna(subset=["timestamp"]).sort_values("timestamp")
+
+                if chart_df.empty:
+                    st.info("No valid year/week timestamps are available for this selection.")
+                elif PLOTLY_AVAILABLE:
+                    if forecast_dims:
+                        dim = st.selectbox(
+                            "PCA coordinate to plot", forecast_dims,
+                            format_func=lambda name: name.replace("z_", "PCA component "),
+                            key="forecast_chart_dimension",
+                        )
+                        actual_col = f"actual_{dim}"
+                        predicted_col = f"predicted_{dim}"
+                        chart_df[actual_col] = pd.to_numeric(chart_df[actual_col], errors="coerce")
+                        chart_df[predicted_col] = pd.to_numeric(chart_df[predicted_col], errors="coerce")
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(
+                            x=chart_df["timestamp"], y=chart_df[actual_col],
+                            mode="lines+markers", name="Observed",
+                            connectgaps=False,
+                        ))
+                        fig.add_trace(go.Scatter(
+                            x=chart_df["timestamp"], y=chart_df[predicted_col],
+                            mode="lines+markers", name="One-step-ahead prediction",
+                            connectgaps=False,
+                        ))
+                        if label_col:
+                            for anomaly_label, symbol in (("Warning", "diamond"), ("High anomaly", "x")):
+                                flagged = chart_df[
+                                    chart_df[label_col].astype(str) == anomaly_label
+                                ].copy()
+                                if not flagged.empty:
+                                    fig.add_trace(go.Scatter(
+                                        x=flagged["timestamp"], y=flagged[actual_col],
+                                        mode="markers", name=f"{anomaly_label} (observed)",
+                                        marker={"symbol": symbol, "size": 11},
+                                        customdata=flagged[[score_col]].to_numpy() if score_col else None,
+                                        hovertemplate=(
+                                            "%{x|%Y-%m-%d}<br>Observed: %{y:.4f}"
+                                            + (f"<br>Anomaly score: %{{customdata[0]:.4f}}" if score_col else "")
+                                            + "<extra>%{fullData.name}</extra>"
+                                        ),
+                                    ))
+                        fig.update_layout(
+                            title=f"Observed vs one-step-ahead prediction — {chart_cluster if cluster_col else 'trajectory'}",
+                            xaxis_title="Week",
+                            yaxis_title=f"{dim} (PCA-space coordinate)",
+                            hovermode="x unified",
+                            legend_title="Series",
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        st.caption(
+                            "Predictions are rolling one-step-ahead estimates using only prior observations. "
+                            "The chart is in PCA space, not physical units. Initial points may have no prediction "
+                            "because the model requires sufficient lookback history."
+                        )
+                    else:
+                        st.info(
+                            "This run has no saved neural forecasts. Enable **Neural prediction residuals** "
+                            "and rerun validation to overlay observed vs predicted PCA coordinates. "
+                            "Showing the selected PCA coordinate with flagged anomalies instead."
+                        )
+                        position_cols = sorted(
+                            [col for col in chart_df.columns if col.startswith("position_")],
+                            key=lambda name: int(name.split("_")[-1]) if name.split("_")[-1].isdigit() else 9999,
+                        )
+                        if position_cols:
+                            position_col = st.selectbox(
+                                "PCA coordinate", position_cols, key="fallback_position_dimension"
+                            )
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(
+                                x=chart_df["timestamp"], y=chart_df[position_col],
+                                mode="lines+markers", name="Observed PCA coordinate",
+                            ))
+                            if label_col:
+                                flagged = chart_df[chart_df[label_col].astype(str) != "Normal"]
+                                if not flagged.empty:
+                                    fig.add_trace(go.Scatter(
+                                        x=flagged["timestamp"], y=flagged[position_col],
+                                        mode="markers", name="Flagged anomaly",
+                                        marker={"symbol": "x", "size": 11},
+                                    ))
+                            fig.update_layout(
+                                title="Observed trajectory coordinate with flagged anomalies",
+                                xaxis_title="Week", yaxis_title="PCA-space coordinate",
+                                hovermode="x unified",
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+
+                    if score_col:
+                        score_plot = chart_df.copy()
+                        score_plot[score_col] = pd.to_numeric(score_plot[score_col], errors="coerce")
+                        score_plot = score_plot.dropna(subset=[score_col])
+                        if not score_plot.empty:
+                            score_fig = px.line(
+                                score_plot, x="timestamp", y=score_col,
+                                color=label_col if label_col else None,
+                                markers=True, title="Anomaly score over time",
+                            )
+                            st.plotly_chart(score_fig, use_container_width=True)
+                else:
+                    st.warning("Install Plotly to enable the interactive forecast/anomaly overlay.")
+
             if score_col:
                 scores = pd.to_numeric(filtered[score_col], errors="coerce").dropna()
                 if not scores.empty:
