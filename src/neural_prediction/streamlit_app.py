@@ -2549,6 +2549,65 @@ with inference_tab:
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
+            actual_columns = sorted(
+                [col for col in timestep_results.columns if col.startswith("actual_z_")],
+                key=lambda col: int(col.rsplit("_", 1)[-1]) if col.rsplit("_", 1)[-1].isdigit() else col,
+            )
+            if actual_columns:
+                actual_col = st.selectbox(
+                    "PCA dimension for forecast diagnostics",
+                    options=actual_columns,
+                    key="integrated_forecast_dimension",
+                )
+                predicted_col = actual_col.replace("actual_", "predicted_", 1)
+                if predicted_col in timestep_results.columns:
+                    forecast_data = timestep_results.copy()
+                    cluster_column = "cluster" if "cluster" in forecast_data.columns else CLUSTER_COL
+                    if cluster_column in forecast_data.columns and "integrated_anomaly_cluster" in st.session_state:
+                        forecast_data = forecast_data[
+                            forecast_data[cluster_column] == st.session_state["integrated_anomaly_cluster"]
+                        ]
+                    if {"year", "week"}.issubset(forecast_data.columns):
+                        forecast_data = forecast_data.sort_values(
+                            ["year", "week"], kind="stable"
+                        )
+                        forecast_data["time_label"] = (
+                            forecast_data["year"].astype(str) + "-W" +
+                            forecast_data["week"].astype(int).astype(str).str.zfill(2)
+                        )
+                    else:
+                        forecast_data["time_label"] = forecast_data["_source_row"].astype(str)
+                    forecast_fig = go.Figure()
+                    forecast_fig.add_trace(go.Scatter(
+                        x=forecast_data["time_label"],
+                        y=forecast_data[actual_col],
+                        mode="lines+markers",
+                        name="Observed",
+                    ))
+                    forecast_fig.add_trace(go.Scatter(
+                        x=forecast_data["time_label"],
+                        y=forecast_data[predicted_col],
+                        mode="lines+markers",
+                        name="One-step-ahead prediction",
+                    ))
+                    flagged_forecasts = forecast_data[
+                        forecast_data["anomaly_label"].isin(["Warning", "High anomaly"])
+                    ]
+                    if not flagged_forecasts.empty:
+                        forecast_fig.add_trace(go.Scatter(
+                            x=flagged_forecasts["time_label"],
+                            y=flagged_forecasts[actual_col],
+                            mode="markers",
+                            marker={"size": 10, "symbol": "x"},
+                            name="Flagged observation",
+                        ))
+                    forecast_fig.update_layout(
+                        title=f"Observed vs predicted trajectory ({actual_col.replace('actual_', '')})",
+                        xaxis_title="Week",
+                        yaxis_title="PCA-space coordinate",
+                    )
+                    st.plotly_chart(forecast_fig, use_container_width=True)
+
             st.markdown("#### Timestep results")
             st.dataframe(timestep_results, use_container_width=True, hide_index=True)
             st.download_button(
