@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
-from PIL import Image
 
 # ============================================================
 # PATH CONFIGURATION
@@ -106,12 +105,8 @@ def load_cached_predictor(checkpoint_path: str, modified_time: float):
 # STREAMLIT CONFIGURATION
 # ============================================================
 
-img = Image.open("icon/icon.png")
-st.set_page_config(
-    page_title="KYRE",
-    page_icon=img,
-    layout="wide",
-)
+# Page configuration is managed by app_unified.py when this module is
+# opened as part of the unified Streamlit application.
 
 st.title("Kinetic Yield and Resource Embeddings: KYRE Prediction Lab")
 st.subheader("© Open iT Inc.,  2026")
