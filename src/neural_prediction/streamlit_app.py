@@ -94,6 +94,8 @@ from src.neural_prediction.evaluation.backtest import (
     compare_backtests,
 )
 
+from src.anomaly import AnomalyConfig, AnomalyDetectionPipeline
+
 
 @st.cache_resource
 def load_cached_predictor(checkpoint_path: str, modified_time: float):
@@ -2313,51 +2315,270 @@ with backtest_tab:
 
 
 # ============================================================
-# INFERENCE TAB
+# INFERENCE → ANOMALY DETECTION TAB
 # ============================================================
 
 with inference_tab:
-
-    st.subheader(
-        "Inference"
-    )
-
+    st.subheader("Inference → Anomaly Detection")
     st.write(
-        "The inference integration consumes the saved "
-        "checkpoint and emits trajectories compatible "
-        "with the existing latent-space prediction pipeline."
+        "Run a saved trajectory model on the chronological test split. "
+        "KYRE then automatically calculates one-step-ahead prediction residuals, "
+        "fuses them with motion and Isolation Forest signals, and displays flagged "
+        "timesteps and trajectory windows in this same workflow."
     )
 
-    if (
-        st.session_state.model
-        is not None
-    ):
-
-        st.success(
-            "A trained model is available "
-            "in the current session."
-        )
-
-    elif (
-        st.session_state.last_checkpoint
-        is not None
-    ):
-
-        st.info(
-            "Last checkpoint:"
-        )
-
-        st.code(
-            str(
-                st.session_state.last_checkpoint
-            )
-        )
-
+    prepared = st.session_state.prepared
+    if prepared is None:
+        st.info("Load and prepare data in the Extraction tab first.")
     else:
+        model_dir = get_model_directory()
+        checkpoints = list_checkpoints(model_dir)
+        if not checkpoints:
+            st.warning("No trained checkpoints found. Train and save a model first.")
+        else:
+            selected_checkpoint = st.selectbox(
+                "Trajectory model checkpoint",
+                options=checkpoints,
+                format_func=lambda path: path.name,
+                key="integrated_inference_checkpoint",
+            )
+            anomaly_window = st.number_input(
+                "Anomaly window size (weeks)",
+                min_value=2,
+                max_value=104,
+                value=12,
+                step=1,
+                key="integrated_anomaly_window",
+            )
+            anomaly_stride = st.number_input(
+                "Anomaly window stride",
+                min_value=1,
+                max_value=52,
+                value=1,
+                step=1,
+                key="integrated_anomaly_stride",
+            )
+            anomaly_estimators = st.number_input(
+                "Isolation Forest estimators",
+                min_value=10,
+                max_value=2000,
+                value=200,
+                step=10,
+                key="integrated_anomaly_estimators",
+            )
+            st.caption(
+                "The detector is fitted on the training split; the validation split "
+                "calibrates neural-residual fusion. The test split is scored only after "
+                "fitting and calibration, and is not used to tune thresholds."
+            )
 
-        st.info(
-            "Train or load a model first."
-        )
+            if st.button(
+                "Run inference → anomaly detection",
+                type="primary",
+                use_container_width=True,
+                key="run_integrated_inference_anomaly",
+            ):
+                try:
+                    train_data = prepared["train"].copy()
+                    validation_data = prepared["validation"].copy()
+                    test_data = prepared["test"].copy()
+
+                    if train_data.empty or validation_data.empty or test_data.empty:
+                        raise ValueError(
+                            "Training, validation, and test splits must all contain rows. "
+                            "Review the Extraction tab split settings."
+                        )
+
+                    checkpoint_path = Path(selected_checkpoint)
+                    predictor = NeuralTrajectoryPredictor.load(checkpoint_path)
+                    checkpoint_dims = getattr(
+                        getattr(predictor.model, "config", None),
+                        "embedding_dim",
+                        None,
+                    )
+                    pca_columns = [
+                        col for col in train_data.columns
+                        if col.startswith(PCA_PREFIX)
+                    ]
+                    if checkpoint_dims is not None and checkpoint_dims != len(pca_columns):
+                        raise ValueError(
+                            f"Selected checkpoint expects {checkpoint_dims} PCA dimensions, "
+                            f"but prepared data contains {len(pca_columns)}. Use a checkpoint "
+                            "trained with the same PCA dimensionality and basis."
+                        )
+
+                    anomaly_config = AnomalyConfig(
+                        pca_prefix=PCA_PREFIX,
+                        cluster_col=CLUSTER_COL,
+                        trajectory_col=None,
+                        year_col="year",
+                        week_col="week",
+                        window_size=int(anomaly_window),
+                        window_stride=int(anomaly_stride),
+                        n_estimators=int(anomaly_estimators),
+                        random_state=SEED,
+                    )
+                    with st.spinner(
+                        "Fitting anomaly detectors on training data and calibrating "
+                        "neural residuals on validation data…"
+                    ):
+                        anomaly_pipeline = AnomalyDetectionPipeline(
+                            anomaly_config,
+                            neural_predictor=predictor,
+                        ).fit(
+                            train_data,
+                            calibration_data=validation_data,
+                        )
+
+                    history = pd.concat(
+                        [train_data, validation_data],
+                        ignore_index=True,
+                    ).sort_values(
+                        [CLUSTER_COL, "year", "week"],
+                        kind="stable",
+                    ).reset_index(drop=True)
+                    test_data = test_data.sort_values(
+                        [CLUSTER_COL, "year", "week"],
+                        kind="stable",
+                    ).reset_index(drop=True)
+
+                    with st.spinner(
+                        "Running trajectory inference and scoring anomaly timesteps/windows…"
+                    ):
+                        timestep_results = anomaly_pipeline.score_timesteps(
+                            test_data,
+                            history_data=history,
+                        )
+                        window_results = anomaly_pipeline.score_windows(
+                            test_data,
+                            history_data=history,
+                        )
+                        trajectory_results = anomaly_pipeline.summarize_trajectories(
+                            timestep_results,
+                            window_results,
+                        )
+
+                    output_dir = DATA_ROOT / "anomaly_inference"
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    timestep_path = output_dir / "timestep_scores.csv"
+                    window_path = output_dir / "window_scores.csv"
+                    trajectory_path = output_dir / "trajectory_summary.csv"
+                    pipeline_path = output_dir / "anomaly_pipeline.joblib"
+                    timestep_results.to_csv(timestep_path, index=False)
+                    window_results.to_csv(window_path, index=False)
+                    trajectory_results.to_csv(trajectory_path, index=False)
+                    anomaly_pipeline.save(pipeline_path)
+
+                    st.session_state["integrated_timestep_results"] = timestep_results
+                    st.session_state["integrated_window_results"] = window_results
+                    st.session_state["integrated_trajectory_results"] = trajectory_results
+                    st.session_state["integrated_anomaly_output_dir"] = str(output_dir)
+
+                    st.success(
+                        "Trajectory inference and anomaly detection completed. "
+                        f"Results saved to {output_dir}."
+                    )
+
+                except Exception as exc:
+                    st.error(
+                        "The integrated inference/anomaly run did not complete. "
+                        "Any previously generated inference results remain available."
+                    )
+                    st.exception(exc)
+
+        timestep_results = st.session_state.get("integrated_timestep_results")
+        window_results = st.session_state.get("integrated_window_results")
+        trajectory_results = st.session_state.get("integrated_trajectory_results")
+
+        if isinstance(timestep_results, pd.DataFrame) and not timestep_results.empty:
+            st.divider()
+            st.subheader("Integrated results")
+            total_rows = len(timestep_results)
+            warning_rows = int((timestep_results["anomaly_label"] == "Warning").sum())
+            high_rows = int((timestep_results["anomaly_label"] == "High anomaly").sum())
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Test timesteps scored", f"{total_rows:,}")
+            c2.metric("Normal", f"{int((timestep_results['anomaly_label'] == 'Normal').sum()):,}")
+            c3.metric("Warning", f"{warning_rows:,}")
+            c4.metric("High anomaly", f"{high_rows:,}")
+
+            if "anomaly_score" in timestep_results.columns:
+                chart_data = timestep_results.copy()
+                if CLUSTER_COL in chart_data.columns:
+                    cluster_filter = st.selectbox(
+                        "Trajectory / cluster to inspect",
+                        options=sorted(chart_data[CLUSTER_COL].dropna().unique().tolist(), key=str),
+                        key="integrated_anomaly_cluster",
+                        format_func=str,
+                    )
+                    chart_data = chart_data[chart_data[CLUSTER_COL] == cluster_filter]
+                if not chart_data.empty:
+                    chart_data = chart_data.sort_values(
+                        ["year", "week"] if {"year", "week"}.issubset(chart_data.columns) else ["_source_row"],
+                        kind="stable",
+                    )
+                    chart_data["time_label"] = (
+                        chart_data["year"].astype(str) + "-W" +
+                        chart_data["week"].astype(int).astype(str).str.zfill(2)
+                        if {"year", "week"}.issubset(chart_data.columns)
+                        else chart_data["_source_row"].astype(str)
+                    )
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=chart_data["time_label"],
+                        y=chart_data["anomaly_score"],
+                        mode="lines+markers",
+                        name="Anomaly score",
+                    ))
+                    for label, symbol in (("Warning", "circle"), ("High anomaly", "x")):
+                        flagged = chart_data[chart_data["anomaly_label"] == label]
+                        if not flagged.empty:
+                            fig.add_trace(go.Scatter(
+                                x=flagged["time_label"],
+                                y=flagged["anomaly_score"],
+                                mode="markers",
+                                marker={"symbol": symbol, "size": 10},
+                                name=label,
+                            ))
+                    fig.update_layout(
+                        title="Anomaly scores over the test period",
+                        xaxis_title="Week",
+                        yaxis_title="Anomaly score (rank scale)",
+                        legend_title="Classification",
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("#### Timestep results")
+            st.dataframe(timestep_results, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download timestep scores CSV",
+                data=timestep_results.to_csv(index=False).encode("utf-8"),
+                file_name="timestep_scores.csv",
+                mime="text/csv",
+            )
+            if isinstance(window_results, pd.DataFrame) and not window_results.empty:
+                st.markdown("#### Trajectory-window results")
+                st.dataframe(window_results, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "Download window scores CSV",
+                    data=window_results.to_csv(index=False).encode("utf-8"),
+                    file_name="window_scores.csv",
+                    mime="text/csv",
+                )
+            if isinstance(trajectory_results, pd.DataFrame) and not trajectory_results.empty:
+                st.markdown("#### Trajectory summary")
+                st.dataframe(trajectory_results, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "Download trajectory summary CSV",
+                    data=trajectory_results.to_csv(index=False).encode("utf-8"),
+                    file_name="trajectory_summary.csv",
+                    mime="text/csv",
+                )
+            st.caption(
+                "Anomaly scores are relative ranking signals, not probabilities. "
+                "Without independent labeled anomalies, these flags should be treated as "
+                "candidates for investigation rather than verified anomaly classifications."
+            )
 
 
 
