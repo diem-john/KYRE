@@ -123,6 +123,19 @@ class NeuralTrajectoryPredictor:
             weights_only=True,
         )
 
+        if isinstance(checkpoint, dict):
+            # Prefer the stored path, but support moving a checkpoint and its
+            # companion artifact together to another machine/directory.
+            artifact_value = checkpoint.get("preprocessing_artifact_path")
+            if artifact_value:
+                artifact_path = Path(artifact_value)
+                if not artifact_path.is_file():
+                    companion_path = checkpoint_path.parent / artifact_path.name
+                    if companion_path.is_file():
+                        checkpoint["preprocessing_artifact_path"] = str(
+                            companion_path.resolve()
+                        )
+
         if not isinstance(checkpoint, dict):
             raise ValueError(
                 "Invalid checkpoint: expected a dictionary."
