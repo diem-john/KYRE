@@ -608,7 +608,7 @@ elif page == "Investigate Results":
                                         ),
                                     ))
                         fig.update_layout(
-                            title=f"Observed vs one-step-ahead prediction — {chart_cluster if cluster_col else 'trajectory'}",
+                            title="Observed vs one-step-ahead prediction",
                             xaxis_title="Week",
                             yaxis_title=f"{dim} (PCA-space coordinate)",
                             hovermode="x unified",
