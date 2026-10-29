@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent
 PROJECTS = ROOT / "projects"
 VALIDATOR = ROOT / "scripts" / "validate_anomaly_real_data.py"
 
-st.set_page_config(page_title="KYRE Anomaly Detection", page_icon="🔎", layout="wide")
+# Page configuration is managed by app_unified.py.
 
 
 def get_projects() -> list[str]:
