@@ -638,6 +638,7 @@ class Trainer:
                 None,
             ]
         ] = None,
+        preprocessing_artifact_path: str | Path | None = None,
     ) -> list[dict[str, Any]]:
         """
         Train the model.
@@ -823,6 +824,7 @@ class Trainer:
                     best_loss=best_val_loss,
                     window_config=window_config,
                     physics_scale=physics_scale,
+                    preprocessing_artifact_path=preprocessing_artifact_path,
                 )
 
             else:
@@ -879,6 +881,7 @@ class Trainer:
         best_loss: float,
         window_config=None,
         physics_scale: float = 1.0,
+        preprocessing_artifact_path: str | Path | None = None,
     ):
         """
         Save the best model checkpoint.
@@ -977,6 +980,12 @@ class Trainer:
             "window_config": (
                 asdict(window_config)
                 if window_config is not None
+                else None
+            ),
+
+            "preprocessing_artifact_path": (
+                str(Path(preprocessing_artifact_path).resolve())
+                if preprocessing_artifact_path is not None
                 else None
             ),
 
