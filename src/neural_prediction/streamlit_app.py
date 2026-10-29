@@ -2551,7 +2551,7 @@ with inference_tab:
 
             actual_columns = sorted(
                 [col for col in timestep_results.columns if col.startswith("actual_z_")],
-                key=lambda col: int(col.rsplit("_", 1)[-1]) if col.rsplit("_", 1)[-1].isdigit() else col,
+                key=lambda col: (0, int(col.rsplit("_", 1)[-1])) if col.rsplit("_", 1)[-1].isdigit() else (1, col),
             )
             if actual_columns:
                 actual_col = st.selectbox(
