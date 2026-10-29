@@ -1,0 +1,100 @@
+[2026-10-01 15:05:50] [STAGE] Cluster Trajectory Prediction Pipeline Started
+[2026-10-01 15:05:50] [INFO] Loading weekly centroid embeddings...
+[2026-10-01 15:05:54] [INFO] Preprocessing weekly centroid embeddings...
+[2026-10-01 15:05:55] [INFO] Splitting weekly centroid embeddings...
+[2026-10-01 15:05:55] [INFO] Adding PCA features to weekly centroid embeddings...
+[2026-10-01 15:05:55] [STAGE] Started cluster trajectory prediction using Kalman Filter approach...
+[2026-10-01 15:09:52] [STATUS] Reference Median Historical Displacement: 2.2600225485117083
+[2026-10-01 15:09:52] [STATUS] === Eval Split: test_holdout ===
+[2026-10-01 15:09:52] [STATUS] Mean RMSE: 0.004669330076818181
+[2026-10-01 15:09:52] [STATUS] Mean Cosine Similarity: 0.9966038050445869
+[2026-10-01 15:09:52] [STATUS] Mean Displacement Cosine Similarity: 0.6721939842249645
+[2026-10-01 15:09:52] [STATUS] Mean Displacement Magnitude Error: 0.02342376511819688
+[2026-10-01 15:09:52] [STATUS] === Eval Split: test_backtest ===
+[2026-10-01 15:09:52] [STATUS] Mean RMSE: 0.004618689299526027
+[2026-10-01 15:09:52] [STATUS] Mean Cosine Similarity: 0.996318773130364
+[2026-10-01 15:09:52] [STATUS] Mean Displacement Cosine Similarity: 0.566931757027888
+[2026-10-01 15:09:52] [STATUS] Mean Displacement Magnitude Error: 0.02669166357389368
+[2026-10-01 15:09:52] [STATUS] === Eval Split: validation_backtest ===
+[2026-10-01 15:09:52] [STATUS] Mean RMSE: 0.005154321264005418
+[2026-10-01 15:09:52] [STATUS] Mean Cosine Similarity: 0.9951574556201438
+[2026-10-01 15:09:52] [STATUS] Mean Displacement Cosine Similarity: 0.5345436289427002
+[2026-10-01 15:09:52] [STATUS] Mean Displacement Magnitude Error: 0.02979042800891365
+[2026-10-01 15:09:52] [STATUS] === Eval Split: train_backtest ===
+[2026-10-01 15:09:52] [STATUS] Mean RMSE: 0.005391741581663614
+[2026-10-01 15:09:52] [STATUS] Mean Cosine Similarity: 0.9945059762950033
+[2026-10-01 15:09:52] [STATUS] Mean Displacement Cosine Similarity: 0.49093243226455063
+[2026-10-01 15:09:52] [STATUS] Mean Displacement Magnitude Error: 0.02576815811562192
+[2026-10-01 15:09:52] [INFO] Detailed metric results are saved in the approach's 'metric' folder.
+[2026-10-01 15:09:52] [STAGE] Saving prediction hyperparameters using the Kalman Filter approach...
+[2026-10-01 15:09:52] [STAGE] Started cluster trajectory prediction using Multi-lag Drift approach...
+[2026-10-01 15:10:15] [STATUS] Reference Median Historical Displacement: 2.2600225485117083
+[2026-10-01 15:10:15] [STATUS] === Eval Split: test_holdout ===
+[2026-10-01 15:10:15] [STATUS] Mean RMSE: 0.006413348668874176
+[2026-10-01 15:10:15] [STATUS] Mean Cosine Similarity: 0.9933835342193538
+[2026-10-01 15:10:15] [STATUS] Mean Displacement Cosine Similarity: -0.28147522393591423
+[2026-10-01 15:10:15] [STATUS] Mean Displacement Magnitude Error: 0.0844933593033602
+[2026-10-01 15:10:15] [STATUS] === Eval Split: test_backtest ===
+[2026-10-01 15:10:15] [STATUS] Mean RMSE: 0.0059092204206333855
+[2026-10-01 15:10:15] [STATUS] Mean Cosine Similarity: 0.9938326749024541
+[2026-10-01 15:10:15] [STATUS] Mean Displacement Cosine Similarity: -0.2530120138300472
+[2026-10-01 15:10:15] [STATUS] Mean Displacement Magnitude Error: 0.07739496201712984
+[2026-10-01 15:10:15] [STATUS] === Eval Split: validation_backtest ===
+[2026-10-01 15:10:15] [STATUS] Mean RMSE: 0.006082385617626378
+[2026-10-01 15:10:15] [STATUS] Mean Cosine Similarity: 0.9933699520707621
+[2026-10-01 15:10:15] [STATUS] Mean Displacement Cosine Similarity: -0.2383506708305675
+[2026-10-01 15:10:15] [STATUS] Mean Displacement Magnitude Error: 0.0801684405856931
+[2026-10-01 15:10:15] [STATUS] === Eval Split: train_backtest ===
+[2026-10-01 15:10:15] [STATUS] Mean RMSE: 0.006181883205412797
+[2026-10-01 15:10:15] [STATUS] Mean Cosine Similarity: 0.9928891048596197
+[2026-10-01 15:10:15] [STATUS] Mean Displacement Cosine Similarity: -0.22430937728137043
+[2026-10-01 15:10:15] [STATUS] Mean Displacement Magnitude Error: 0.08023119427550798
+[2026-10-01 15:10:15] [INFO] Detailed metric results are saved in the approach's 'metric' folder.
+[2026-10-01 15:10:15] [STAGE] Saving prediction hyperparameters using the Multi-lag Drift approach...
+[2026-10-01 15:10:15] [STAGE] Started cluster trajectory prediction using Polynomial Regression approach...
+[2026-10-01 15:10:54] [STATUS] Reference Median Historical Displacement: 2.2600225485117083
+[2026-10-01 15:10:54] [STATUS] === Eval Split: test_holdout ===
+[2026-10-01 15:10:54] [STATUS] Mean RMSE: 0.011281204038857103
+[2026-10-01 15:10:54] [STATUS] Mean Cosine Similarity: 0.983288426521531
+[2026-10-01 15:10:54] [STATUS] Mean Displacement Cosine Similarity: 0.45900169259804074
+[2026-10-01 15:10:54] [STATUS] Mean Displacement Magnitude Error: 0.09663909551298992
+[2026-10-01 15:10:54] [STATUS] === Eval Split: test_backtest ===
+[2026-10-01 15:10:54] [STATUS] Mean RMSE: 0.011809559825232364
+[2026-10-01 15:10:54] [STATUS] Mean Cosine Similarity: 0.9819971517860335
+[2026-10-01 15:10:54] [STATUS] Mean Displacement Cosine Similarity: 0.2755407828531072
+[2026-10-01 15:10:54] [STATUS] Mean Displacement Magnitude Error: 0.09972365117710819
+[2026-10-01 15:10:54] [STATUS] === Eval Split: validation_backtest ===
+[2026-10-01 15:10:54] [STATUS] Mean RMSE: 0.011956688414261145
+[2026-10-01 15:10:54] [STATUS] Mean Cosine Similarity: 0.9811996724262171
+[2026-10-01 15:10:54] [STATUS] Mean Displacement Cosine Similarity: 0.2743864658807718
+[2026-10-01 15:10:54] [STATUS] Mean Displacement Magnitude Error: 0.09524224816049366
+[2026-10-01 15:10:54] [STATUS] === Eval Split: train_backtest ===
+[2026-10-01 15:10:54] [STATUS] Mean RMSE: 0.01228843869790086
+[2026-10-01 15:10:54] [STATUS] Mean Cosine Similarity: 0.979453302181709
+[2026-10-01 15:10:54] [STATUS] Mean Displacement Cosine Similarity: 0.3000789720538842
+[2026-10-01 15:10:54] [STATUS] Mean Displacement Magnitude Error: 0.09692931375818813
+[2026-10-01 15:10:54] [INFO] Detailed metric results are saved in the approach's 'metric' folder.
+[2026-10-01 15:10:54] [STAGE] Saving prediction hyperparameters using the Polynomial Regression approach...
+[2026-10-01 15:10:54] [STAGE] Started Behavioral Decoder and Anomaly Detection...
+[2026-10-01 15:10:54] [INFO] Preparing historical and predicted centroid embeddings inputs before behavioral decoder and anomaly detection...
+[2026-10-01 15:10:54] [STAGE] Processing behavior decode and anomaly detection for Kalman approach...
+[2026-10-01 15:10:55] [INFO] Decoding centroid behavior...
+[2026-10-01 15:10:58] [INFO] Using decoder best model directory: projects/trajectory_prediction_data_hitachi/centroid_trajectory_predictions/behavioral_decoder/best_model
+[2026-10-01 15:10:58] [INFO] Loaded decoder feature mapping: projects/trajectory_prediction_data_hitachi/centroid_trajectory_predictions/behavioral_decoder/best_model/feature_mapping.csv
+[2026-10-01 15:10:58] [INFO] Using saved decoder best threshold: 0.5
+[2026-10-01 15:11:58] [INFO] Saved decoded historical: projects/trajectory_prediction_data_hitachi/centroid_trajectory_predictions/behavioral_decoder/decoded_centroids/kalman/decoded_historical_weekly_centroid_emb.csv
+[2026-10-01 15:11:58] [INFO] Saved decoded predicted: projects/trajectory_prediction_data_hitachi/centroid_trajectory_predictions/behavioral_decoder/decoded_centroids/kalman/decoded_predicted_weekly_centroid_emb.csv
+[2026-10-01 15:11:58] [INFO] Started anomaly detection...
+[2026-10-01 15:12:04] [STATUS] Evaluating decoded behavior...
+[2026-10-01 15:12:16] [STATUS] === Decoded Behavior Metrics for Kalman ===
+[2026-10-01 15:12:16] [STATUS] Feature F1: Mean = 0.946955932955933 | Median = 1.0
+[2026-10-01 15:12:16] [STATUS] Feature Jaccard: Mean = 0.9184675324675324 | Median = 1.0
+[2026-10-01 15:12:16] [STATUS] Normalized Mean Squared Error Elapsed Time: Mean = 0.3782924387797459 | Median = 0.24351401504282072
+[2026-10-01 15:12:16] [STATUS] Elapsed Time Distribution Similarity: Mean = 0.9216948030879456 | Median = 0.9794287522164409
+[2026-10-01 15:12:16] [STATUS] Total Elapsed Time Percentage Error: Mean = 0.3049324461050157 | Median = 0.15531769419202604
+[2026-10-01 15:12:16] [INFO] Detailed metric results are saved in the approach's 'decoded_behavior_metrics' folder.
+[2026-10-01 15:12:16] [STAGE] Started cluster trajectory prediction visualization...
+[2026-10-01 15:12:16] [STAGE] Visualizing centroids for the Kalman approach...
+[2026-10-01 15:12:16] [INFO] Adding decoded behavior column for visualization...
+[2026-10-01 15:12:28] [INFO] Scaling and fitting the centroid embeddings using the same Scaler and PCA model...
+[2026-10-01 15:13:25] [STAGE] Cluster Trajectory Prediction Pipeline Finished.
