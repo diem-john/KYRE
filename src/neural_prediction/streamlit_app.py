@@ -2551,62 +2551,154 @@ with inference_tab:
 
             actual_columns = sorted(
                 [col for col in timestep_results.columns if col.startswith("actual_z_")],
-                key=lambda col: (0, int(col.rsplit("_", 1)[-1])) if col.rsplit("_", 1)[-1].isdigit() else (1, col),
+                key=lambda col: (0, int(col.rsplit("_", 1)[-1]))
+                if col.rsplit("_", 1)[-1].isdigit() else (1, col),
             )
-            if actual_columns:
-                actual_col = st.selectbox(
-                    "PCA dimension for forecast diagnostics",
-                    options=actual_columns,
-                    key="integrated_forecast_dimension",
+            predicted_columns = [
+                col.replace("actual_", "predicted_", 1)
+                for col in actual_columns
+            ]
+            available_dimensions = [
+                (actual, predicted)
+                for actual, predicted in zip(actual_columns, predicted_columns)
+                if predicted in timestep_results.columns
+            ]
+
+            st.markdown("#### 3D observed vs. predicted trajectory")
+            if len(available_dimensions) >= 3:
+                selected_dimensions = st.multiselect(
+                    "Select three PCA dimensions (ordered as X, Y, Z)",
+                    options=[pair[0] for pair in available_dimensions],
+                    default=[pair[0] for pair in available_dimensions[:3]],
+                    max_selections=3,
+                    key="integrated_forecast_3d_dimensions",
                 )
-                predicted_col = actual_col.replace("actual_", "predicted_", 1)
-                if predicted_col in timestep_results.columns:
+                if len(selected_dimensions) != 3:
+                    st.info("Select exactly three PCA dimensions to render the 3D trajectory.")
+                else:
+                    dimension_pairs = [
+                        next(pair for pair in available_dimensions if pair[0] == actual)
+                        for actual in selected_dimensions
+                    ]
                     forecast_data = timestep_results.copy()
                     cluster_column = "cluster" if "cluster" in forecast_data.columns else CLUSTER_COL
-                    if cluster_column in forecast_data.columns and "integrated_anomaly_cluster" in st.session_state:
+                    if (
+                        cluster_column in forecast_data.columns
+                        and "integrated_anomaly_cluster" in st.session_state
+                    ):
                         forecast_data = forecast_data[
-                            forecast_data[cluster_column] == st.session_state["integrated_anomaly_cluster"]
+                            forecast_data[cluster_column]
+                            == st.session_state["integrated_anomaly_cluster"]
                         ]
-                    if {"year", "week"}.issubset(forecast_data.columns):
+                    sort_columns = [
+                        col for col in ("year", "week", "_source_row")
+                        if col in forecast_data.columns
+                    ]
+                    if sort_columns:
                         forecast_data = forecast_data.sort_values(
-                            ["year", "week"], kind="stable"
+                            sort_columns, kind="stable"
                         )
-                        forecast_data["time_label"] = (
-                            forecast_data["year"].astype(str) + "-W" +
-                            forecast_data["week"].astype(int).astype(str).str.zfill(2)
+                    forecast_data = forecast_data.dropna(
+                        subset=[col for pair in dimension_pairs for col in pair]
+                    )
+                    if not forecast_data.empty:
+                        x_actual, x_pred = dimension_pairs[0]
+                        y_actual, y_pred = dimension_pairs[1]
+                        z_actual, z_pred = dimension_pairs[2]
+
+                        forecast_fig = go.Figure()
+                        forecast_fig.add_trace(go.Scatter3d(
+                            x=forecast_data[x_actual],
+                            y=forecast_data[y_actual],
+                            z=forecast_data[z_actual],
+                            mode="lines+markers",
+                            name="Observed trajectory",
+                            marker={"size": 3},
+                            line={"width": 5},
+                            customdata=(
+                                forecast_data[["year", "week"]].to_numpy()
+                                if {"year", "week"}.issubset(forecast_data.columns)
+                                else None
+                            ),
+                            hovertemplate=(
+                                "Observed trajectory<br>"
+                                "PCA X: %{x:.3f}<br>PCA Y: %{y:.3f}<br>"
+                                "PCA Z: %{z:.3f}<extra></extra>"
+                            ),
+                        ))
+                        forecast_fig.add_trace(go.Scatter3d(
+                            x=forecast_data[x_pred],
+                            y=forecast_data[y_pred],
+                            z=forecast_data[z_pred],
+                            mode="lines+markers",
+                            name="One-step-ahead prediction",
+                            marker={"size": 3, "symbol": "diamond"},
+                            line={"width": 4, "dash": "dash"},
+                            hovertemplate=(
+                                "Predicted trajectory<br>"
+                                "PCA X: %{x:.3f}<br>PCA Y: %{y:.3f}<br>"
+                                "PCA Z: %{z:.3f}<extra></extra>"
+                            ),
+                        ))
+                        flagged_forecasts = forecast_data[
+                            forecast_data["anomaly_label"].isin(
+                                ["Warning", "High anomaly"]
+                            )
+                        ]
+                        if not flagged_forecasts.empty:
+                            forecast_fig.add_trace(go.Scatter3d(
+                                x=flagged_forecasts[x_actual],
+                                y=flagged_forecasts[y_actual],
+                                z=flagged_forecasts[z_actual],
+                                mode="markers",
+                                marker={"size": 7, "symbol": "x"},
+                                name="Flagged observed timestep",
+                                hovertemplate=(
+                                    "Flagged observation<br>"
+                                    "PCA X: %{x:.3f}<br>PCA Y: %{y:.3f}<br>"
+                                    "PCA Z: %{z:.3f}<extra></extra>"
+                                ),
+                            ))
+                        forecast_fig.update_layout(
+                            title="Observed vs. predicted trajectory in 3D PCA space",
+                            scene={
+                                "xaxis_title": x_actual.replace("actual_", ""),
+                                "yaxis_title": y_actual.replace("actual_", ""),
+                                "zaxis_title": z_actual.replace("actual_", ""),
+                                "aspectmode": "data",
+                            },
+                            height=700,
+                            margin={"l": 0, "r": 0, "t": 60, "b": 0},
+                            legend={
+                                "orientation": "h",
+                                "yanchor": "bottom",
+                                "y": 1.02,
+                                "xanchor": "left",
+                                "x": 0,
+                            },
+                        )
+                        st.plotly_chart(
+                            forecast_fig,
+                            use_container_width=True,
+                            key="integrated_forecast_3d_plot",
                         )
                     else:
-                        forecast_data["time_label"] = forecast_data["_source_row"].astype(str)
-                    forecast_fig = go.Figure()
-                    forecast_fig.add_trace(go.Scatter(
-                        x=forecast_data["time_label"],
-                        y=forecast_data[actual_col],
-                        mode="lines+markers",
-                        name="Observed",
-                    ))
-                    forecast_fig.add_trace(go.Scatter(
-                        x=forecast_data["time_label"],
-                        y=forecast_data[predicted_col],
-                        mode="lines+markers",
-                        name="One-step-ahead prediction",
-                    ))
-                    flagged_forecasts = forecast_data[
-                        forecast_data["anomaly_label"].isin(["Warning", "High anomaly"])
-                    ]
-                    if not flagged_forecasts.empty:
-                        forecast_fig.add_trace(go.Scatter(
-                            x=flagged_forecasts["time_label"],
-                            y=flagged_forecasts[actual_col],
-                            mode="markers",
-                            marker={"size": 10, "symbol": "x"},
-                            name="Flagged observation",
-                        ))
-                    forecast_fig.update_layout(
-                        title=f"Observed vs predicted trajectory ({actual_col.replace('actual_', '')})",
-                        xaxis_title="Week",
-                        yaxis_title="PCA-space coordinate",
-                    )
-                    st.plotly_chart(forecast_fig, use_container_width=True)
+                        st.warning("No complete observed/predicted 3D points are available for the selected trajectory.")
+            elif len(available_dimensions) == 2:
+                st.info(
+                    "Only two PCA forecast dimensions are available. A 3D plot needs "
+                    "three observed/predicted PCA dimensions."
+                )
+            elif len(available_dimensions) == 1:
+                st.info(
+                    "Only one PCA forecast dimension is available. A 3D plot needs "
+                    "three observed/predicted PCA dimensions."
+                )
+            else:
+                st.info(
+                    "No observed/predicted PCA coordinates were found in the anomaly "
+                    "results. Run inference with neural prediction residuals enabled."
+                )
 
             st.markdown("#### Timestep results")
             st.dataframe(timestep_results, use_container_width=True, hide_index=True)
