@@ -13,6 +13,10 @@ from .models.hybrid_cnn_lstm_attention import (
     ConvLSTMAttention,
 )
 from .data.dataset import WindowConfig, _features
+from .preprocessing_artifacts import (
+    load_preprocessing_artifacts,
+    transform_embeddings,
+)
 
 
 class NeuralTrajectoryPredictor:
@@ -44,6 +48,13 @@ class NeuralTrajectoryPredictor:
         self.model = model.to(self.device)
         self.model.eval()
         self.checkpoint = checkpoint or {}
+
+        self.preprocessing_artifacts = None
+        artifact_path = self.checkpoint.get("preprocessing_artifact_path")
+        if artifact_path:
+            self.preprocessing_artifacts = load_preprocessing_artifacts(
+                artifact_path
+            )
 
         saved_window_config = self.checkpoint.get("window_config", {})
         if not isinstance(saved_window_config, dict):
@@ -208,6 +219,34 @@ class NeuralTrajectoryPredictor:
         history_array = history_array[
             ..., -self.window_config.lookback:, :
         ]
+
+        # If the caller supplies raw embeddings, apply the exact scaler/PCA
+        # fitted during training before constructing temporal features.
+        # PCA-space input is left untouched to avoid a double transform.
+        if self.preprocessing_artifacts is not None:
+            raw_dim = int(
+                self.preprocessing_artifacts["input_dimension"]
+            )
+            pca_dim = int(
+                self.preprocessing_artifacts["output_dimension"]
+            )
+            supplied_dim = int(history_array.shape[-1])
+            if supplied_dim == raw_dim and raw_dim != pca_dim:
+                if history_array.ndim != 2:
+                    raise ValueError(
+                        "Raw embedding batches must be transformed per "
+                        "trajectory; supply a single [weeks, dimensions] "
+                        "history or pre-transformed batched features."
+                    )
+                history_array = transform_embeddings(
+                    history_array, self.preprocessing_artifacts
+                )
+            elif supplied_dim not in (raw_dim, pca_dim):
+                raise ValueError(
+                    "Input dimensions do not match the saved preprocessing "
+                    f"schema: expected raw={raw_dim} or PCA={pca_dim}, "
+                    f"received {supplied_dim}."
+                )
 
         expected_features = getattr(
             getattr(self.model, "config", None),
