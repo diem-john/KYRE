@@ -7,11 +7,7 @@ The prediction and anomaly workflows remain separate pages so their existing
 UI and model pipelines can be preserved while sharing one application shell.
 """
 
-from pathlib import Path
-
 import streamlit as st
-
-ROOT = Path(__file__).resolve().parent
 
 # Page configuration belongs to this entry point. Child pages intentionally
 # do not call st.set_page_config().
