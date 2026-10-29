@@ -164,6 +164,9 @@ class NeuralPredictionSignal:
         errors = np.full(
             len(target), np.nan, dtype=np.float64
         )
+        predictions = np.full(
+            (len(target), len(positions)), np.nan, dtype=np.float64
+        )
 
         context = (
             history_data.copy()
@@ -295,7 +298,9 @@ class NeuralPredictionSignal:
                     )
 
                     # First forecast step is the next-week estimate.
-                    errors[int(row["_source_row"])] = float(
+                    source_row = int(row["_source_row"])
+                    predictions[source_row] = prediction[0]
+                    errors[source_row] = float(
                         np.sqrt(
                             np.mean(
                                 np.square(actual - prediction[0])
@@ -313,11 +318,15 @@ class NeuralPredictionSignal:
                 )
                 prior_times.append(target_time)
 
-        return pd.DataFrame(
-            {
-                "_source_row": np.arange(
-                    len(target), dtype=np.int64
-                ),
-                "neural_prediction_error": errors,
-            }
-        )
+        # Keep one-step-ahead forecasts aligned with the target rows so the
+        # dashboard can plot actual vs predicted PCA coordinates and mark anomalies.
+        forecast_columns: dict[str, Any] = {
+            "_source_row": np.arange(len(target), dtype=np.int64),
+            "neural_prediction_error": errors,
+        }
+        for dim, position_col in enumerate(positions):
+            actual_values = target[position_col].to_numpy(dtype=np.float64)
+            forecast_columns[f"actual_{position_col}"] = actual_values
+            forecast_columns[f"predicted_{position_col}"] = predictions[:, dim]
+
+        return pd.DataFrame(forecast_columns)
