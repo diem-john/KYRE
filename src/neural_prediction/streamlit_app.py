@@ -2504,14 +2504,15 @@ with inference_tab:
 
             if "anomaly_score" in timestep_results.columns:
                 chart_data = timestep_results.copy()
-                if CLUSTER_COL in chart_data.columns:
+                cluster_column = "cluster" if "cluster" in chart_data.columns else CLUSTER_COL
+                if cluster_column in chart_data.columns:
                     cluster_filter = st.selectbox(
                         "Trajectory / cluster to inspect",
-                        options=sorted(chart_data[CLUSTER_COL].dropna().unique().tolist(), key=str),
+                        options=sorted(chart_data[cluster_column].dropna().unique().tolist(), key=str),
                         key="integrated_anomaly_cluster",
                         format_func=str,
                     )
-                    chart_data = chart_data[chart_data[CLUSTER_COL] == cluster_filter]
+                    chart_data = chart_data[chart_data[cluster_column] == cluster_filter]
                 if not chart_data.empty:
                     chart_data = chart_data.sort_values(
                         ["year", "week"] if {"year", "week"}.issubset(chart_data.columns) else ["_source_row"],
