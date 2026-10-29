@@ -40,6 +40,7 @@ from config import (
 )
 
 from src.trajectory_prediction.utils.preprocessing import (
+    embedding_cols,
     load_centroid_weekly_embeddings,
     preprocess_centroids,
     split_train_validation_test_sequences,
@@ -80,6 +81,10 @@ from src.neural_prediction.training.trainer import (
 
 from src.neural_prediction.inference import (
     NeuralTrajectoryPredictor,
+)
+
+from src.neural_prediction.preprocessing_artifacts import (
+    save_preprocessing_artifacts,
 )
 
 from src.neural_prediction.models.registry import (
@@ -1784,6 +1789,25 @@ with train_tab:
                     ),
                 )
 
+                # Persist the exact scaler/PCA fitted on the training split.
+                # Validation and test data have already reused these objects.
+                prepared_data = st.session_state.prepared
+                preprocessing_artifact = checkpoint.with_suffix(
+                    ".preprocessing.joblib"
+                )
+                save_preprocessing_artifacts(
+                    preprocessing_artifact,
+                    pca=prepared_data["pca"],
+                    scaler=prepared_data["scaler"],
+                    embedding_columns=embedding_cols(
+                        prepared_data["train"], EMB_PREFIX
+                    ),
+                    input_prefix=EMB_PREFIX,
+                    output_prefix=PCA_PREFIX,
+                    n_components=int(pca_dims),
+                    seed=SEED,
+                )
+
                 history = trainer.fit(
                     st.session_state.train_dataset,
                     st.session_state.validation_dataset,
@@ -1792,6 +1816,7 @@ with train_tab:
                     epoch_callback=(
                         update_training_telemetry
                     ),
+                    preprocessing_artifact_path=preprocessing_artifact,
                 )
 
                 # =================================================
