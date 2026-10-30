@@ -1,0 +1,6 @@
+trajectory_id,row_index,injected_column,spike_magnitude_in_train_std,baseline_score,injected_score,score_increased,injected_label
+0,12,z_0,8.0,0.5543478260869565,1.0,True,High anomaly
+1,36,z_0,8.0,0.8677536231884058,1.0,True,High anomaly
+10,60,z_0,8.0,0.9492753623188406,1.0,True,High anomaly
+11_high,84,z_0,8.0,0.5760869565217391,1.0,True,High anomaly
+11_low,108,z_0,8.0,0.5416666666666666,1.0,True,High anomaly
