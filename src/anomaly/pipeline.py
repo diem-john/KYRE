@@ -269,7 +269,21 @@ class AnomalyDetectionPipeline:
 
             # Thresholds for the fused score are calibrated on held-out validation
             # observations, not on the detector's training rows.
-            point_scores = calibration_points["anomaly_score"].to_numpy(dtype=float)
+            # Calibrate fused thresholds only on rows/windows with an actual
+            # neural residual. Rows without enough prior history remain scoreable
+            # by statistical components at inference, but must not be treated as
+            # zero-error neural examples when setting neural-fusion thresholds.
+            point_valid = np.isfinite(
+                calibration_points["neural_prediction_error"].to_numpy(dtype=float)
+            )
+            point_scores = calibration_points.loc[
+                point_valid, "anomaly_score"
+            ].to_numpy(dtype=float)
+            if not len(point_scores):
+                raise ValueError(
+                    "No calibration timesteps have valid neural residuals; "
+                    "cannot calibrate fused timestep thresholds."
+                )
             self.thresholds_["timestep"] = {
                 "warning": float(np.quantile(point_scores, self.config.warning_quantile)),
                 "high": float(np.quantile(point_scores, self.config.high_quantile)),
@@ -277,7 +291,17 @@ class AnomalyDetectionPipeline:
             calibration_windows = self.score_windows(
                 calibration_data, history_data=reference_data
             )
-            window_scores = calibration_windows["anomaly_score"].to_numpy(dtype=float)
+            window_valid = np.isfinite(
+                calibration_windows["neural_prediction_error"].to_numpy(dtype=float)
+            )
+            window_scores = calibration_windows.loc[
+                window_valid, "anomaly_score"
+            ].to_numpy(dtype=float)
+            if not len(window_scores):
+                raise ValueError(
+                    "No calibration windows have valid neural residuals; "
+                    "cannot calibrate fused window thresholds."
+                )
             self.thresholds_["window"] = {
                 "warning": float(np.quantile(window_scores, self.config.warning_quantile)),
                 "high": float(np.quantile(window_scores, self.config.high_quantile)),
