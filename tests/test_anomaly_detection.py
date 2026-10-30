@@ -109,3 +109,55 @@ def test_neural_calibration_split_allows_unseen_clusters():
     AnomalyDetectionPipeline._validate_chronological_split(
         reference, calibration
     )
+
+
+class _MockWindowConfig:
+    lookback = 3
+
+
+class _MockNeuralPredictor:
+    window_config = _MockWindowConfig()
+
+    def predict(self, history):
+        # Predict the next point as the most recent point. This isolates history
+        # eligibility behavior from the performance of a trained checkpoint.
+        return np.asarray(history[-1:], dtype=float)
+
+
+def test_neural_signal_returns_nan_until_lookback_history_exists():
+    from src.anomaly.neural_signal import NeuralPredictionSignal
+
+    targets = sample_data(5)
+    targets = targets[targets["final_cluster_label"] == "A"].reset_index(drop=True)
+    signal = NeuralPredictionSignal(_MockNeuralPredictor())
+
+    result = signal.score(targets)
+
+    assert result["neural_prediction_error"].iloc[:3].isna().all()
+    assert np.isfinite(result["neural_prediction_error"].iloc[3:]).all()
+    assert result["predicted_z_0"].iloc[:3].isna().all()
+    assert np.isfinite(result["predicted_z_0"].iloc[3:]).all()
+
+
+def test_neural_signal_unseen_cluster_needs_prior_history():
+    from src.anomaly.neural_signal import NeuralPredictionSignal
+
+    reference = sample_data(5)
+    targets = sample_data(5).assign(final_cluster_label="UNSEEN", year=2026)
+    signal = NeuralPredictionSignal(_MockNeuralPredictor())
+
+    result = signal.score(targets, history_data=reference)
+
+    # No reference observations belong to UNSEEN, so the first lookback-sized
+    # prefix cannot receive neural residuals.
+    assert result["neural_prediction_error"].iloc[:3].isna().all()
+    assert np.isfinite(result["neural_prediction_error"].iloc[3:]).all()
+
+
+def test_unavailable_residuals_are_excluded_from_calibration_quantiles():
+    # The threshold calibration should use only rows with finite neural residuals.
+    scores = np.array([0.2, 0.4, 0.99])
+    residuals = np.array([np.nan, 0.1, 0.2])
+    valid_scores = scores[np.isfinite(residuals)]
+
+    assert np.quantile(valid_scores, 0.5) == np.quantile([0.4, 0.99], 0.5)
