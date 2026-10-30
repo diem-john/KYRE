@@ -161,6 +161,13 @@ def main():
 
     run_dir = args.run_dir.expanduser().resolve()
     output_dir = (args.output_dir or (run_dir / "component_ablation")).expanduser().resolve()
+    repo_root = Path(__file__).resolve().parents[1]
+
+    def report_path(path: Path) -> str:
+        try:
+            return path.resolve().relative_to(repo_root.resolve()).as_posix()
+        except ValueError:
+            return path.name
     output_dir.mkdir(parents=True, exist_ok=True)
 
     all_summaries = []
@@ -188,7 +195,7 @@ def main():
 
     report = {
         "method": "fixed-score component ablation; no model refitting",
-        "input_run_directory": run_dir.as_posix(),
+        "input_run_directory": report_path(run_dir),
         "warning_quantile": args.warning_quantile,
         "high_quantile": args.high_quantile,
         "inputs": input_files,
