@@ -99,16 +99,13 @@ def test_neural_calibration_split_rejects_overlapping_periods():
         raise AssertionError("Expected overlapping calibration period to be rejected")
 
 
-def test_neural_calibration_split_rejects_unseen_clusters():
+def test_neural_calibration_split_allows_unseen_clusters():
+    """Unseen clusters are valid for statistical scoring; neural history may be unavailable."""
     reference = sample_data(10)
     calibration = sample_data(10).assign(year=2026)
     calibration["final_cluster_label"] = "UNSEEN"
 
-    try:
-        AnomalyDetectionPipeline._validate_chronological_split(
-            reference, calibration
-        )
-    except ValueError as exc:
-        assert "clusters absent from reference_data" in str(exc)
-    else:
-        raise AssertionError("Expected unseen calibration clusters to be rejected")
+    # Chronology is enforced, but cluster novelty alone is not leakage or invalid data.
+    AnomalyDetectionPipeline._validate_chronological_split(
+        reference, calibration
+    )
