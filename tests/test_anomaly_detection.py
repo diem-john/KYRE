@@ -73,3 +73,42 @@ def test_pipeline_fit_score_and_round_trip(tmp_path):
     assert np.allclose(
         points["anomaly_score"], reloaded_points["anomaly_score"]
     )
+
+
+
+def test_neural_calibration_split_requires_strictly_later_period():
+    reference = sample_data(10)
+    calibration = sample_data(10).assign(year=2026)
+
+    AnomalyDetectionPipeline._validate_chronological_split(
+        reference, calibration
+    )
+
+
+def test_neural_calibration_split_rejects_overlapping_periods():
+    reference = sample_data(10)
+    calibration = sample_data(10)
+
+    try:
+        AnomalyDetectionPipeline._validate_chronological_split(
+            reference, calibration
+        )
+    except ValueError as exc:
+        assert "strictly later" in str(exc)
+    else:
+        raise AssertionError("Expected overlapping calibration period to be rejected")
+
+
+def test_neural_calibration_split_rejects_unseen_clusters():
+    reference = sample_data(10)
+    calibration = sample_data(10).assign(year=2026)
+    calibration["final_cluster_label"] = "UNSEEN"
+
+    try:
+        AnomalyDetectionPipeline._validate_chronological_split(
+            reference, calibration
+        )
+    except ValueError as exc:
+        assert "clusters absent from reference_data" in str(exc)
+    else:
+        raise AssertionError("Expected unseen calibration clusters to be rejected")
