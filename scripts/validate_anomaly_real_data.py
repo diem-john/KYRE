@@ -72,6 +72,21 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def report_path(path: Path | None) -> str | None:
+    """Return repository-relative paths in reports whenever possible.
+
+    Paths outside the repository remain absolute because they cannot be
+    represented truthfully as repository-relative paths.
+    """
+    if path is None:
+        return None
+    resolved = path.expanduser().resolve()
+    try:
+        return resolved.relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
 def json_default(value):
     if isinstance(value, (np.integer,)):
         return int(value)
@@ -406,8 +421,8 @@ def main() -> int:
 
     report = {
         "project_name": args.project_name,
-        "centroid_directory": str(centroid_dir),
-        "parquet_files": [str(path) for path in parquet_files],
+        "centroid_directory": report_path(centroid_dir),
+        "parquet_files": [report_path(path) for path in parquet_files],
         "raw_rows": int(len(raw)),
         "clean_rows": int(len(clean)),
         "embedding_dimensions": int(len(embedding_cols)),
@@ -432,7 +447,7 @@ def main() -> int:
         "anomaly_thresholds": pipeline.thresholds_,
         "neural_prediction_signal": {
             "enabled": neural_predictor is not None,
-            "checkpoint": str(checkpoint_path) if checkpoint_path is not None else None,
+            "checkpoint": report_path(checkpoint_path),
             "device": args.neural_device if neural_predictor is not None else None,
             "lookback_weeks": (
                 int(neural_predictor.window_config.lookback)
@@ -477,7 +492,7 @@ def main() -> int:
             "Rows without enough preceding history have no neural residual; the neural rank is neutral for those rows.",
             "Flagged real trajectories require domain review before being treated as genuine anomalies.",
         ],
-        "output_directory": str(output_dir),
+        "output_directory": report_path(output_dir),
     }
     with (output_dir / "validation_report.json").open("w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2, default=json_default)
