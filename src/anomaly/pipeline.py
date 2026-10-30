@@ -103,7 +103,12 @@ class AnomalyDetectionPipeline:
         year_col: str = "year",
         week_col: str = "week",
     ) -> None:
-        """Reject missing, overlapping, or reversed reference/calibration periods."""
+        """Reject missing, overlapping, or reversed reference/calibration periods.
+
+        Calibration may contain unseen clusters. Those rows can still be scored by
+        the statistical detectors; neural residuals are only usable where sufficient
+        preceding history exists, and unavailable residuals must not be fabricated.
+        """
         if calibration_data is None or calibration_data.empty:
             raise ValueError(
                 "calibration_data is required when neural prediction scoring is enabled; "
@@ -141,15 +146,6 @@ class AnomalyDetectionPipeline:
                 "overlapping or reversed time periods are not allowed."
             )
 
-        reference_clusters = set(reference_data[cluster_col].dropna().unique())
-        calibration_clusters = set(calibration_data[cluster_col].dropna().unique())
-        unseen_clusters = calibration_clusters.difference(reference_clusters)
-        if unseen_clusters:
-            raise ValueError(
-                "calibration_data contains clusters absent from reference_data: "
-                f"{sorted(map(str, unseen_clusters))}. Each calibrated cluster needs "
-                "reference history for leakage-aware neural scoring."
-            )
 
     def fit(
         self,
@@ -159,8 +155,9 @@ class AnomalyDetectionPipeline:
         """Fit detectors on reference data and optionally calibrate neural fusion on held-out data.
 
         When a neural predictor is supplied, calibration_data is required and must
-        be chronologically after reference_data. This prevents in-sample neural
-        residuals from setting the fused anomaly thresholds.
+        be chronologically after reference_data. Calibration can include unseen
+        clusters; their neural residuals remain unavailable until valid prior history
+        exists, while non-neural detectors can still score their rows.
         """
         if reference_data.empty:
             raise ValueError("Reference data cannot be empty")
