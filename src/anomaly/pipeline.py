@@ -94,6 +94,59 @@ class AnomalyDetectionPipeline:
             np.where(scores >= thresholds["warning"], "Warning", "Normal"),
         )
 
+    @staticmethod
+    def _validate_chronological_split(
+        reference_data: pd.DataFrame,
+        calibration_data: pd.DataFrame | None,
+        *,
+        cluster_col: str = "final_cluster_label",
+        year_col: str = "year",
+        week_col: str = "week",
+    ) -> None:
+        """Reject missing, overlapping, or reversed reference/calibration periods.
+
+        Calibration may contain unseen clusters. Those rows can still be scored by
+        the statistical detectors; neural residuals are only usable where sufficient
+        preceding history exists, and unavailable residuals must not be fabricated.
+        """
+        if calibration_data is None or calibration_data.empty:
+            raise ValueError(
+                "calibration_data is required when neural prediction scoring is enabled; "
+                "use a chronological held-out validation split."
+            )
+
+        required = {cluster_col, year_col, week_col}
+        for name, frame in (
+            ("reference_data", reference_data),
+            ("calibration_data", calibration_data),
+        ):
+            missing = sorted(required.difference(frame.columns))
+            if missing:
+                raise ValueError(f"{name} is missing split columns: {missing}")
+            years = pd.to_numeric(frame[year_col], errors="coerce")
+            weeks = pd.to_numeric(frame[week_col], errors="coerce")
+            if years.isna().any() or weeks.isna().any():
+                raise ValueError(
+                    f"{name} contains missing or non-numeric year/week values."
+                )
+            if ((weeks < 1) | (weeks > 53)).any():
+                raise ValueError(f"{name} contains week values outside 1..53.")
+
+        reference_times = list(zip(
+            pd.to_numeric(reference_data[year_col], errors="raise"),
+            pd.to_numeric(reference_data[week_col], errors="raise"),
+        ))
+        calibration_times = list(zip(
+            pd.to_numeric(calibration_data[year_col], errors="raise"),
+            pd.to_numeric(calibration_data[week_col], errors="raise"),
+        ))
+        if max(reference_times) >= min(calibration_times):
+            raise ValueError(
+                "calibration_data must be strictly later than reference_data; "
+                "overlapping or reversed time periods are not allowed."
+            )
+
+
     def fit(
         self,
         reference_data: pd.DataFrame,
@@ -102,11 +155,20 @@ class AnomalyDetectionPipeline:
         """Fit detectors on reference data and optionally calibrate neural fusion on held-out data.
 
         When a neural predictor is supplied, calibration_data is required and must
-        be chronologically after reference_data. This prevents in-sample neural
-        residuals from setting the fused anomaly thresholds.
+        be chronologically after reference_data. Calibration can include unseen
+        clusters; their neural residuals remain unavailable until valid prior history
+        exists, while non-neural detectors can still score their rows.
         """
         if reference_data.empty:
             raise ValueError("Reference data cannot be empty")
+        if self.neural_signal is not None:
+            self._validate_chronological_split(
+                reference_data,
+                calibration_data,
+                cluster_col=self.config.cluster_col,
+                year_col=self.config.year_col,
+                week_col=self.config.week_col,
+            )
         timesteps = self.motion_scorer.fit(self._timestep_features(reference_data)).score(
             self._timestep_features(reference_data)
         )
@@ -207,7 +269,21 @@ class AnomalyDetectionPipeline:
 
             # Thresholds for the fused score are calibrated on held-out validation
             # observations, not on the detector's training rows.
-            point_scores = calibration_points["anomaly_score"].to_numpy(dtype=float)
+            # Calibrate fused thresholds only on rows/windows with an actual
+            # neural residual. Rows without enough prior history remain scoreable
+            # by statistical components at inference, but must not be treated as
+            # zero-error neural examples when setting neural-fusion thresholds.
+            point_valid = np.isfinite(
+                calibration_points["neural_prediction_error"].to_numpy(dtype=float)
+            )
+            point_scores = calibration_points.loc[
+                point_valid, "anomaly_score"
+            ].to_numpy(dtype=float)
+            if not len(point_scores):
+                raise ValueError(
+                    "No calibration timesteps have valid neural residuals; "
+                    "cannot calibrate fused timestep thresholds."
+                )
             self.thresholds_["timestep"] = {
                 "warning": float(np.quantile(point_scores, self.config.warning_quantile)),
                 "high": float(np.quantile(point_scores, self.config.high_quantile)),
@@ -215,7 +291,17 @@ class AnomalyDetectionPipeline:
             calibration_windows = self.score_windows(
                 calibration_data, history_data=reference_data
             )
-            window_scores = calibration_windows["anomaly_score"].to_numpy(dtype=float)
+            window_valid = np.isfinite(
+                calibration_windows["neural_prediction_error"].to_numpy(dtype=float)
+            )
+            window_scores = calibration_windows.loc[
+                window_valid, "anomaly_score"
+            ].to_numpy(dtype=float)
+            if not len(window_scores):
+                raise ValueError(
+                    "No calibration windows have valid neural residuals; "
+                    "cannot calibrate fused window thresholds."
+                )
             self.thresholds_["window"] = {
                 "warning": float(np.quantile(window_scores, self.config.warning_quantile)),
                 "high": float(np.quantile(window_scores, self.config.high_quantile)),

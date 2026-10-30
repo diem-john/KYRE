@@ -16,6 +16,10 @@ if str(REPO_ROOT) not in sys.path:
 from config import CLUSTER_COL, EMB_PREFIX, PCA_PREFIX, SEED
 from src.anomaly import AnomalyConfig, AnomalyDetectionPipeline
 from src.neural_prediction.inference import NeuralTrajectoryPredictor
+from src.neural_prediction.preprocessing_artifacts import (
+    load_preprocessing_artifacts,
+    transform_embeddings,
+)
 from src.trajectory_prediction.utils.pca_preprocessing import add_pca_features
 from src.trajectory_prediction.utils.preprocessing import (
     load_centroid_weekly_embeddings,
@@ -44,6 +48,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--window-stride", type=int, default=1)
     parser.add_argument("--estimators", type=int, default=200)
     parser.add_argument("--spike-magnitude", type=float, default=8.0)
+    parser.add_argument(
+        "--output-dir", type=Path, default=None,
+        help="Optional output directory. Defaults to <project>/anomaly_validation; set this to preserve prior validation outputs.",
+    )
+    parser.add_argument(
+        "--preprocessing-artifact", type=Path, default=None,
+        help="Saved train-fitted scaler/PCA artifact used to train the neural checkpoint. Required when --neural-checkpoint is supplied.",
+    )
     parser.add_argument("--max-injection-trajectories", type=int, default=5)
     parser.add_argument(
         "--neural-checkpoint",
@@ -58,6 +70,21 @@ def parse_args() -> argparse.Namespace:
         help="Device used for neural inference when --neural-checkpoint is supplied.",
     )
     return parser.parse_args()
+
+
+def report_path(path: Path | None) -> str | None:
+    """Return repository-relative paths in reports whenever possible.
+
+    Paths outside the repository remain absolute because they cannot be
+    represented truthfully as repository-relative paths.
+    """
+    if path is None:
+        return None
+    resolved = path.expanduser().resolve()
+    try:
+        return resolved.relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
 
 
 def json_default(value):
@@ -100,7 +127,9 @@ def main() -> int:
     args = parse_args()
     project_dir = args.projects_root / args.project_name
     centroid_dir = project_dir / "cluster_embeddings" / "centroids_with_usage_labels"
-    output_dir = project_dir / "anomaly_validation"
+    output_dir = args.output_dir if args.output_dir is not None else project_dir / "anomaly_validation"
+    if not output_dir.is_absolute():
+        output_dir = REPO_ROOT / output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if not centroid_dir.is_dir():
@@ -168,19 +197,71 @@ def main() -> int:
             "clusters have min_train_weeks + validation_weeks + test_weeks observations."
         )
 
-    print("[4/7] Fitting scaler/PCA on train only; transforming validation and test")
-    train_m, pca, scaler, variance = add_pca_features(
-        train, n_dims=args.pca_dims, input_prefix=EMB_PREFIX,
-        output_prefix=PCA_PREFIX, seed=SEED,
-    )
-    validation_m, _, _, _ = add_pca_features(
-        validation, n_dims=args.pca_dims, input_prefix=EMB_PREFIX,
-        output_prefix=PCA_PREFIX, seed=SEED, pca_model=pca, scaler_model=scaler,
-    )
-    test_m, _, _, _ = add_pca_features(
-        test, n_dims=args.pca_dims, input_prefix=EMB_PREFIX,
-        output_prefix=PCA_PREFIX, seed=SEED, pca_model=pca, scaler_model=scaler,
-    )
+    print("[4/7] Applying train-fitted scaler/PCA; transforming validation and test")
+    if args.preprocessing_artifact is not None:
+        artifact_path = args.preprocessing_artifact
+        if not artifact_path.is_absolute():
+            artifact_path = REPO_ROOT / artifact_path
+        preprocessing = load_preprocessing_artifacts(artifact_path)
+        artifact_columns = list(preprocessing["embedding_columns"])
+        missing_artifact_columns = sorted(set(artifact_columns).difference(train.columns))
+        if missing_artifact_columns:
+            raise ValueError(
+                "Raw data is missing embedding columns required by the saved preprocessing artifact: "
+                f"{missing_artifact_columns[:10]}"
+            )
+        if int(preprocessing["output_dimension"]) != args.pca_dims:
+            raise ValueError(
+                f"Preprocessing artifact output_dimension={preprocessing['output_dimension']} "
+                f"does not match --pca-dims={args.pca_dims}."
+            )
+
+        def transform_with_saved_artifact(frame):
+            out = frame.copy()
+            matrix = transform_embeddings(
+                out[artifact_columns].to_numpy(dtype=np.float64), preprocessing
+            )
+            z_columns = [
+                f"{preprocessing['output_prefix']}{i}"
+                for i in range(matrix.shape[1])
+            ]
+            out[z_columns] = matrix
+            return out
+
+        train_m = transform_with_saved_artifact(train)
+        validation_m = transform_with_saved_artifact(validation)
+        test_m = transform_with_saved_artifact(test)
+        pca = preprocessing["pca"]
+        scaler = preprocessing["scaler"]
+        variance = pd.DataFrame({
+            "component": [
+                f"{preprocessing['output_prefix']}{i}"
+                for i in range(len(pca.explained_variance_ratio_))
+            ],
+            "explained_variance_ratio": pca.explained_variance_ratio_,
+            "cumulative_explained_variance_ratio": np.cumsum(
+                pca.explained_variance_ratio_
+            ),
+        })
+        print(f"  Reused saved preprocessing artifact: {artifact_path}")
+    else:
+        if args.neural_checkpoint is not None:
+            raise ValueError(
+                "--preprocessing-artifact is required with --neural-checkpoint so "
+                "neural residuals use the exact scaler/PCA basis used during training."
+            )
+        train_m, pca, scaler, variance = add_pca_features(
+            train, n_dims=args.pca_dims, input_prefix=EMB_PREFIX,
+            output_prefix=PCA_PREFIX, seed=SEED,
+        )
+        validation_m, _, _, _ = add_pca_features(
+            validation, n_dims=args.pca_dims, input_prefix=EMB_PREFIX,
+            output_prefix=PCA_PREFIX, seed=SEED, pca_model=pca, scaler_model=scaler,
+        )
+        test_m, _, _, _ = add_pca_features(
+            test, n_dims=args.pca_dims, input_prefix=EMB_PREFIX,
+            output_prefix=PCA_PREFIX, seed=SEED, pca_model=pca, scaler_model=scaler,
+        )
 
     # The current neural_prediction prepare_data() references an undefined clean_m
     # in its return dict. This script avoids that path and explicitly combines the
@@ -340,8 +421,8 @@ def main() -> int:
 
     report = {
         "project_name": args.project_name,
-        "centroid_directory": str(centroid_dir),
-        "parquet_files": [str(path) for path in parquet_files],
+        "centroid_directory": report_path(centroid_dir),
+        "parquet_files": [report_path(path) for path in parquet_files],
         "raw_rows": int(len(raw)),
         "clean_rows": int(len(clean)),
         "embedding_dimensions": int(len(embedding_cols)),
@@ -366,7 +447,7 @@ def main() -> int:
         "anomaly_thresholds": pipeline.thresholds_,
         "neural_prediction_signal": {
             "enabled": neural_predictor is not None,
-            "checkpoint": str(checkpoint_path) if checkpoint_path is not None else None,
+            "checkpoint": report_path(checkpoint_path),
             "device": args.neural_device if neural_predictor is not None else None,
             "lookback_weeks": (
                 int(neural_predictor.window_config.lookback)
@@ -411,7 +492,7 @@ def main() -> int:
             "Rows without enough preceding history have no neural residual; the neural rank is neutral for those rows.",
             "Flagged real trajectories require domain review before being treated as genuine anomalies.",
         ],
-        "output_directory": str(output_dir),
+        "output_directory": report_path(output_dir),
     }
     with (output_dir / "validation_report.json").open("w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2, default=json_default)
