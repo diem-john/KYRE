@@ -514,13 +514,15 @@ class FrozenNeuralPredictor:
         return np.concatenate(parts, axis=1).astype(np.float32)
 
     def predict(self, history):
-        features = self.build_features(
-            history,
-            include_velocity=self.include_velocity,
-            include_acceleration=self.include_acceleration,
-        )
+        """
+        Delegate PCA-space history to NeuralTrajectoryPredictor.
 
-        return self.predictor.predict(features)
+        The predictor validates the input representation and constructs
+        the model-ready temporal features using its saved configuration.
+        Passing preconstructed features here would make the predictor
+        interpret 96-dimensional model features as raw/PCA embeddings.
+        """
+        return self.predictor.predict(history)
 
 
 # ============================================================
