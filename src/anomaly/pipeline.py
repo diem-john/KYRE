@@ -94,6 +94,63 @@ class AnomalyDetectionPipeline:
             np.where(scores >= thresholds["warning"], "Warning", "Normal"),
         )
 
+    @staticmethod
+    def _validate_chronological_split(
+        reference_data: pd.DataFrame,
+        calibration_data: pd.DataFrame | None,
+        *,
+        cluster_col: str = "final_cluster_label",
+        year_col: str = "year",
+        week_col: str = "week",
+    ) -> None:
+        """Reject missing, overlapping, or reversed reference/calibration periods."""
+        if calibration_data is None or calibration_data.empty:
+            raise ValueError(
+                "calibration_data is required when neural prediction scoring is enabled; "
+                "use a chronological held-out validation split."
+            )
+
+        required = {cluster_col, year_col, week_col}
+        for name, frame in (
+            ("reference_data", reference_data),
+            ("calibration_data", calibration_data),
+        ):
+            missing = sorted(required.difference(frame.columns))
+            if missing:
+                raise ValueError(f"{name} is missing split columns: {missing}")
+            years = pd.to_numeric(frame[year_col], errors="coerce")
+            weeks = pd.to_numeric(frame[week_col], errors="coerce")
+            if years.isna().any() or weeks.isna().any():
+                raise ValueError(
+                    f"{name} contains missing or non-numeric year/week values."
+                )
+            if ((weeks < 1) | (weeks > 53)).any():
+                raise ValueError(f"{name} contains week values outside 1..53.")
+
+        reference_times = list(zip(
+            pd.to_numeric(reference_data[year_col], errors="raise"),
+            pd.to_numeric(reference_data[week_col], errors="raise"),
+        ))
+        calibration_times = list(zip(
+            pd.to_numeric(calibration_data[year_col], errors="raise"),
+            pd.to_numeric(calibration_data[week_col], errors="raise"),
+        ))
+        if max(reference_times) >= min(calibration_times):
+            raise ValueError(
+                "calibration_data must be strictly later than reference_data; "
+                "overlapping or reversed time periods are not allowed."
+            )
+
+        reference_clusters = set(reference_data[cluster_col].dropna().unique())
+        calibration_clusters = set(calibration_data[cluster_col].dropna().unique())
+        unseen_clusters = calibration_clusters.difference(reference_clusters)
+        if unseen_clusters:
+            raise ValueError(
+                "calibration_data contains clusters absent from reference_data: "
+                f"{sorted(map(str, unseen_clusters))}. Each calibrated cluster needs "
+                "reference history for leakage-aware neural scoring."
+            )
+
     def fit(
         self,
         reference_data: pd.DataFrame,
@@ -107,6 +164,14 @@ class AnomalyDetectionPipeline:
         """
         if reference_data.empty:
             raise ValueError("Reference data cannot be empty")
+        if self.neural_signal is not None:
+            self._validate_chronological_split(
+                reference_data,
+                calibration_data,
+                cluster_col=self.config.cluster_col,
+                year_col=self.config.year_col,
+                week_col=self.config.week_col,
+            )
         timesteps = self.motion_scorer.fit(self._timestep_features(reference_data)).score(
             self._timestep_features(reference_data)
         )
