@@ -143,13 +143,17 @@ def test_neural_signal_unseen_cluster_needs_prior_history():
     from src.anomaly.neural_signal import NeuralPredictionSignal
 
     reference = sample_data(5)
-    targets = sample_data(5).assign(final_cluster_label="UNSEEN", year=2026)
+    # Keep one original cluster so assigning the unseen label does not merge
+    # two trajectories with duplicate year/week timestamps into one cluster.
+    targets = sample_data(5)
+    targets = targets[targets["final_cluster_label"] == "A"].copy()
+    targets = targets.assign(final_cluster_label="UNSEEN", year=2026)
     signal = NeuralPredictionSignal(_MockNeuralPredictor())
 
     result = signal.score(targets, history_data=reference)
 
-    # No reference observations belong to UNSEEN, so the first lookback-sized
-    # prefix cannot receive neural residuals.
+    # No reference observations belong to UNSEEN. With a lookback of three,
+    # the first three target rows lack three strictly earlier observations.
     assert result["neural_prediction_error"].iloc[:3].isna().all()
     assert np.isfinite(result["neural_prediction_error"].iloc[3:]).all()
 
