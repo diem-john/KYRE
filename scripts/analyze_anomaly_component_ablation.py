@@ -62,7 +62,7 @@ def score_frame(frame: pd.DataFrame, level: str, warning_q: float, high_q: float
 
         matrix = frame[columns].apply(pd.to_numeric, errors="coerce")
         values = matrix.max(axis=1, skipna=False).to_numpy(dtype=float)
-        valid_calibration = frame["sequence_split"].eq("validation").to_numpy()
+        valid_calibration = frame["sequence_split"].eq("validation").to_numpy(copy=True)
         if config == "neural_only":
             if "neural_prediction_error" not in frame.columns:
                 raise ValueError(
